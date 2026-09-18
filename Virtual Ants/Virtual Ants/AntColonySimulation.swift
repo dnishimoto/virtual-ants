@@ -13,7 +13,7 @@ import Combine
 
 @MainActor
 final class AntColonySimulation: ObservableObject {
-    private let reproductionInterval = 10
+    private let reproductionInterval = 7
     
     @Published var colonyAlarm = 0.0
     
@@ -101,7 +101,7 @@ final class AntColonySimulation: ObservableObject {
     let maximumPopulation = 1000
 
     // Maximum number of food patches outside the colony.
-    private let maximumFoodSources = 70
+    private let maximumFoodSources = 95
 
     private var nextFoodGeneration = 1
 
@@ -417,7 +417,7 @@ final class AntColonySimulation: ObservableObject {
 
             amount =
                 Double.random(
-                    in: 40...115
+                    in: 55...150
                 ) *
                 populationFactor
 
@@ -425,7 +425,7 @@ final class AntColonySimulation: ObservableObject {
 
             amount =
                 Double.random(
-                    in: 20...68
+                    in: 28...90
                 ) *
                 populationFactor
 
@@ -433,7 +433,7 @@ final class AntColonySimulation: ObservableObject {
 
             amount =
                 Double.random(
-                    in: 7...30
+                    in: 10...40
                 ) *
                 populationFactor
 
@@ -441,7 +441,7 @@ final class AntColonySimulation: ObservableObject {
 
             amount =
                 Double.random(
-                    in: 27...88
+                    in: 36...115
                 ) *
                 populationFactor
         }
@@ -1557,7 +1557,7 @@ final class AntColonySimulation: ObservableObject {
         // PHYSICAL FOOD STORAGE.
         // -------------------------------------------------
 
-        let minimumFoodForBreeding = 5.0
+        let minimumFoodForBreeding = 4.0
 
         guard storedFood >= minimumFoodForBreeding else {
             return
@@ -1584,7 +1584,7 @@ final class AntColonySimulation: ObservableObject {
                 )
             )
 
-        guard energyPerAnt > 5.0 else {
+        guard energyPerAnt > 3.5 else {
             return
         }
 
@@ -1597,9 +1597,9 @@ final class AntColonySimulation: ObservableObject {
 
         let reproductionRate =
             min(
-                0.055,
-                0.006 +
-                foodRatio * 0.049
+                0.085,
+                0.010 +
+                foodRatio * 0.075
             )
 
         // Calculate the number of workers requested
@@ -1630,7 +1630,7 @@ final class AntColonySimulation: ObservableObject {
         // FOOD COST
         // -------------------------------------------------
 
-        let foodCostPerBirth = 9.0
+        let foodCostPerBirth = 7.0
 
         let totalFoodCost =
             Double(
@@ -1989,13 +1989,13 @@ final class AntColonySimulation: ObservableObject {
 
         // Base nest storage.
         let base =
-            150.0
+            220.0
 
         // Each storage chamber adds real capacity.
         let chamberCapacity =
             Double(
                 storageCells
-            ) * 65.0
+            ) * 85.0
 
         storageCapacity =
             base +
@@ -4324,4 +4324,5 @@ extension AntColonySimulation {
         return "ALERT"
     }
 }
+
 
