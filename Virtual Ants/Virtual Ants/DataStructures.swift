@@ -90,16 +90,15 @@ enum Terrain {
     case obstacle
 }
 
-// MARK: - Ant State
 
-enum AntState: String {
+enum AntState {
     case searching
+    case exploring
     case returning
     case resting
-    case exploring
     case building
+    case defending
 }
-
 // MARK: - Food Source
 
 struct FoodSource: Identifiable {
@@ -119,6 +118,7 @@ struct FoodSource: Identifiable {
 // MARK: - Ant
 
 struct Ant: Identifiable {
+
     let id = UUID()
 
     var x: Double
@@ -143,6 +143,14 @@ struct Ant: Identifiable {
     // Individual behavioral variation.
     var pheromoneSensitivity: Double = 1.0
     var explorationBias: Double = 1.0
+
+    // Defensive behavior.
+    // When true, this individual ant has been recruited
+    // by the defensive cellular automaton.
+    var defending: Bool = false
+
+    // UUID of the specific invader this ant is pursuing.
+    var defenseTargetID: UUID?
 
     var hasFood: Bool {
         carriedFood > 0.01

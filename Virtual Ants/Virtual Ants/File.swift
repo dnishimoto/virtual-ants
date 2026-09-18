@@ -79,6 +79,7 @@ struct ColonyInvader: Identifiable {
 
     var health: Double
     var age: Int
+    var alive: Bool
 
     var directionX: Double
     var directionY: Double
@@ -101,11 +102,10 @@ struct ColonyInvader: Identifiable {
         self.directionY = 0
         self.targetX = nil
         self.targetY = nil
+        self.alive = true
     }
 
-    var alive: Bool {
-        health > 0
-    }
+    
 }
 
 // MARK: - Defensive Cell

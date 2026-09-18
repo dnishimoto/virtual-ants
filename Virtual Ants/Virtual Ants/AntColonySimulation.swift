@@ -13,6 +13,11 @@ import Combine
 
 @MainActor
 final class AntColonySimulation: ObservableObject {
+    private let movementEnergyCost = 0.45
+    
+    let spawnChance = 0.50
+    
+    private var defenseStepCounter = 0
     
     @Published var invaders: [ColonyInvader] = []
 
@@ -32,7 +37,7 @@ final class AntColonySimulation: ObservableObject {
 
     private var defenseInitialized = false
 
-    private var nextInvaderGeneration: Int = 20
+    private var nextInvaderGeneration: Int = 5
 
     private let maximumInvaders = 12
 
@@ -579,6 +584,14 @@ final class AntColonySimulation: ObservableObject {
         }
 
         generation += 1
+        
+        // Existing simulation work.
+        defenseStepCounter += 1
+
+        if defenseStepCounter >= 10 {
+            defenseStepCounter = 0
+            stepDefenseSystem()
+        }
 
         generateFoodIfNeeded()
 
@@ -1726,6 +1739,9 @@ final class AntColonySimulation: ObservableObject {
 
         case .building:
             base = 0.36
+
+        case .defending:
+            base = 0.48
         }
 
         return base *
@@ -2852,8 +2868,7 @@ extension AntColonySimulation {
 
     // MARK: Defensive Step
 
-    func stepDefenseSystem() {
-
+    private func stepDefenseSystem() {
         initializeDefenseSystem()
 
         defenseGeneration += 1
@@ -2880,7 +2895,122 @@ extension AntColonySimulation {
 
         calculateDefensiveAlarm()
     }
+    private func resolveDefensiveContacts() {
 
+        guard !ants.isEmpty,
+              !invaders.isEmpty,
+              !defenseCells.isEmpty
+        else {
+            return
+        }
+
+        let gridWidth = 100
+        let gridHeight = defenseCells.count / gridWidth
+
+        guard gridHeight > 0 else {
+            return
+        }
+
+        let contactDistance = 1.0
+        let baseDamage = 1.0
+
+        for antIndex in ants.indices {
+
+            guard ants[antIndex].defending,
+                  let targetID = ants[antIndex].defenseTargetID
+            else {
+                continue
+            }
+
+            guard let invaderIndex = invaders.firstIndex(
+                where: {
+                    $0.id == targetID &&
+                    $0.health > 0.0
+                }
+            )
+            else {
+                ants[antIndex].defending = false
+                ants[antIndex].defenseTargetID = nil
+                ants[antIndex].state = .searching
+                continue
+            }
+
+            let antX = ants[antIndex].x
+            let antY = ants[antIndex].y
+
+            let invaderX = invaders[invaderIndex].x
+            let invaderY = invaders[invaderIndex].y
+
+            let dx = invaderX - antX
+            let dy = invaderY - antY
+
+            let distanceToInvader = sqrt(
+                dx * dx + dy * dy
+            )
+
+            guard distanceToInvader <= contactDistance else {
+                continue
+            }
+
+            // Convert the invader's Double position into
+            // the canonical defense-grid coordinate.
+            let gridX = Int(
+                clamp(
+                    invaderX.rounded(),
+                    0.0,
+                    Double(gridWidth - 1)
+                )
+            )
+
+            let gridY = Int(
+                clamp(
+                    invaderY.rounded(),
+                    0.0,
+                    Double(gridHeight - 1)
+                )
+            )
+
+            let defenseIndex = gridY * gridWidth + gridX
+
+            guard defenseCells.indices.contains(defenseIndex) else {
+                continue
+            }
+
+            let defenseStrength = max(
+                0.0,
+                defenseCells[defenseIndex].defenseStrength
+            )
+
+            // Defensive cellular-automaton strength
+            // increases the damage delivered by the ant.
+            let damage =
+                baseDamage *
+                (1.0 + defenseStrength)
+
+            invaders[invaderIndex].health = max(
+                0.0,
+                invaders[invaderIndex].health - damage
+            )
+
+            // Combat consumes additional ant energy.
+            ants[antIndex].energy = max(
+                0.0,
+                ants[antIndex].energy - 0.5
+            )
+
+            // alive is computed from health, so do NOT assign to it.
+            if invaders[invaderIndex].health <= 0.0 {
+
+                invaders[invaderIndex].health = 0.0
+
+                invadersDefeated += 1
+
+                ants[antIndex].defending = false
+                ants[antIndex].defenseTargetID = nil
+                ants[antIndex].state = .searching
+            }
+        }
+    }
     // MARK: Invader Generation
 
     private func spawnInvadersIfNeeded() {
@@ -2889,9 +3019,9 @@ extension AntColonySimulation {
             return
         }
 
-        guard defenseGeneration >= nextInvaderGeneration else {
-            return
-        }
+        guard Double.random(in: 0...1) < spawnChance else {
+              return
+          }
 
         let colonyPressure = min(
             1.0,
@@ -3024,32 +3154,69 @@ extension AntColonySimulation {
 
     private func updateInvaderOccupancy() {
 
-        for index in defenseCells.indices {
-
-            defenseCells[index]
-                .occupiedByInvader = false
+        // The defense grid must correspond one-to-one
+        // with the existing colony cell grid.
+        guard defenseCells.count == cells.count else {
+            print(
+                "⚠️ Defense grid mismatch:",
+                "cells =", cells.count,
+                "defenseCells =", defenseCells.count
+            )
+            return
         }
 
-        for invader in invaders {
+        // Derive the grid dimensions from the existing colony grid.
+        // This avoids depending on gridWidth/gridHeight being in scope here.
+        let width = 100
+        let height = cells.count / width
 
-            let x = Int(invader.x.rounded())
-            let y = Int(invader.y.rounded())
+        guard width > 0, height > 0 else {
+            return
+        }
 
-            guard
-                x >= 0,
-                x < width,
-                y >= 0,
-                y < height
+        // Reset current-generation defense occupancy/signals.
+        for index in defenseCells.indices {
+            defenseCells[index].occupiedByInvader = false
+            defenseCells[index].threat = 0.0
+            defenseCells[index].alarm = 0.0
+            defenseCells[index].defenderSignal = 0.0
+        }
+
+        // Map every living invader onto the same
+        // spatial grid used by the colony.
+        for invader in invaders
+        where invader.alive && invader.health > 0.0 {
+
+            let x = Int(
+                clamp(
+                    invader.x.rounded(),
+                    0.0,
+                    Double(width - 1)
+                )
+            )
+
+            let y = Int(
+                clamp(
+                    invader.y.rounded(),
+                    0.0,
+                    Double(height - 1)
+                )
+            )
+
+            let index = y * width + x
+
+            guard cells.indices.contains(index),
+                  defenseCells.indices.contains(index)
             else {
                 continue
             }
 
-            defenseCells[
-                indexFor(x, y)
-            ].occupiedByInvader = true
+            defenseCells[index].occupiedByInvader = true
+            defenseCells[index].threat = 1.0
+            defenseCells[index].alarm = 1.0
+            defenseCells[index].defenderSignal = 1.0
         }
     }
-
     // MARK: Threat Propagation
 
     private func propagateThreat() {
@@ -3223,66 +3390,284 @@ extension AntColonySimulation {
                 * 8.0
             )
     }
+    private func distance(
+        x1: Double,
+        y1: Double,
+        x2: Double,
+        y2: Double
+    ) -> Double {
 
+        let dx = x2 - x1
+        let dy = y2 - y1
+
+        return sqrt(
+            dx * dx +
+            dy * dy
+        )
+    }
+    private func nearestInvader(
+        toX x: Int,
+        y: Int
+    ) -> ColonyInvader? {
+
+        var nearest: ColonyInvader?
+        var nearestDistance = Double.infinity
+
+        for invader in invaders
+        where invader.alive && invader.health > 0.0 {
+
+            let d = distance(
+                x1: Double(x),
+                y1: Double(y),
+                x2: invader.x,
+                y2: invader.y
+            )
+
+            if d < nearestDistance {
+                nearestDistance = d
+                nearest = invader
+            }
+        }
+
+        return nearest
+    }
     // MARK: Defender Recruitment
 
     private func recruitDefenders() {
 
-        defendersActive = 0
+        guard !invaders.isEmpty else {
+            return
+        }
+
+        let recruitmentRadius = 8.0
+
+        for antIndex in ants.indices {
+
+            // Do not continuously retarget an ant that is already defending.
+            if ants[antIndex].defending,
+               ants[antIndex].defenseTargetID != nil {
+                continue
+            }
+
+            let antX = ants[antIndex].x
+            let antY = ants[antIndex].y
+
+            var selectedInvader: ColonyInvader?
+            var selectedDistance = Double.infinity
+
+            for invader in invaders
+            where invader.alive && invader.health > 0.0 {
+
+                let invaderX = Int(
+                    invader.x.rounded()
+                )
+
+                let invaderY = Int(
+                    invader.y.rounded()
+                )
+
+                let d = distance(
+                    x1: antX,
+                    y1: antY,
+                    x2: Double(invaderX),
+                    y2: Double(invaderY)
+                )
+
+                guard d <= recruitmentRadius else {
+                    continue
+                }
+
+                let invaderIndexX = Int(
+                    clamp(
+                        invader.x.rounded(),
+                        0.0,
+                        99.0
+                    )
+                )
+
+                let invaderIndexY = Int(
+                    clamp(
+                        invader.y.rounded(),
+                        0.0,
+                        64.0
+                    )
+                )
+
+                let defenseIndex =
+                    indexFor(
+                        invaderIndexX,
+                        invaderIndexY
+                    )
+
+                guard defenseCells.indices.contains(defenseIndex) else {
+                    continue
+                }
+
+                let cell = defenseCells[defenseIndex]
+
+                guard cell.threat > 0.0 ||
+                      cell.alarm > 0.0 ||
+                      cell.defenderSignal > 0.0
+                else {
+                    continue
+                }
+
+                if d < selectedDistance {
+                    selectedDistance = d
+                    selectedInvader = invader
+                }
+            }
+
+            guard let target = selectedInvader else {
+                continue
+            }
+
+            ants[antIndex].defending = true
+            ants[antIndex].defenseTargetID = target.id
+            ants[antIndex].state = .defending
+        }
+    }
+    private func moveToward(
+        ant: inout Ant,
+        targetX: Double,
+        targetY: Double
+    ) {
+
+        let width = 100
+        let height = max(cells.count / width, 1)
+
+        let dx = targetX - ant.x
+        let dy = targetY - ant.y
+
+        guard abs(dx) > 0.0001 || abs(dy) > 0.0001 else {
+            ant.directionX = 0.0
+            ant.directionY = 0.0
+            return
+        }
+
+        if abs(dx) > abs(dy) {
+
+            ant.directionX = dx > 0.0 ? 1.0 : -1.0
+            ant.directionY = 0.0
+
+        } else {
+
+            ant.directionX = 0.0
+            ant.directionY = dy > 0.0 ? 1.0 : -1.0
+        }
+
+        let newX = ant.x + ant.directionX
+        let newY = ant.y + ant.directionY
+
+        guard newX >= 0.0,
+              newX < Double(width),
+              newY >= 0.0,
+              newY < Double(height)
+        else {
+            return
+        }
+
+        let gridX = Int(
+            clamp(
+                newX.rounded(),
+                0.0,
+                Double(width - 1)
+            )
+        )
+
+        let gridY = Int(
+            clamp(
+                newY.rounded(),
+                0.0,
+                Double(height - 1)
+            )
+        )
+
+        let index = gridY * width + gridX
+
+        guard cells.indices.contains(index),
+              cells[index].terrain != .obstacle
+        else {
+            return
+        }
+
+        ant.x = newX
+        ant.y = newY
+    }
+    private func moveDefendingAnts() {
 
         guard !ants.isEmpty else {
             return
         }
 
-        let recruitmentRatio =
-            min(
-                0.45,
-                0.08 +
-                defensiveAlarm * 0.42
-            )
+        for antIndex in ants.indices {
 
-        for index in ants.indices {
-
-            let ant = ants[index]
-
-            let x =
-                Int(
-                    ant.x.rounded()
-                )
-
-            let y =
-                Int(
-                    ant.y.rounded()
-                )
-
-            guard
-                x >= 0,
-                x < width,
-                y >= 0,
-                y < height
+            guard ants[antIndex].defending,
+                  let targetID = ants[antIndex].defenseTargetID
             else {
                 continue
             }
 
-            let cell =
-                defenseCells[
-                    indexFor(x, y)
-                ]
+            guard let invader = invaders.first(
+                where: {
+                    $0.id == targetID &&
+                    $0.alive &&
+                    $0.health > 0.0
+                }
+            )
+            else {
+                ants[antIndex].defending = false
+                ants[antIndex].defenseTargetID = nil
+                ants[antIndex].state = .searching
+                continue
+            }
 
-            if cell.alarm >
-                    defenseActivationThreshold &&
-                Double.random(in: 0...1)
-                    < recruitmentRatio {
+            let targetX = Int(
+                clamp(
+                    invader.x.rounded(),
+                    0.0,
+                    99.0
+                )
+            )
 
-                defendersActive += 1
+            let targetY = Int(
+                clamp(
+                    invader.y.rounded(),
+                    0.0,
+                    64.0
+                )
+            )
 
-                moveDefender(
-                    antIndex: index
+            let d = distance(
+                x1: ants[antIndex].x,
+                y1: ants[antIndex].y,
+                x2: Double(targetX),
+                y2: Double(targetY)
+            )
+
+            if d > 1.0 {
+
+                moveToward(
+                    ant: &ants[antIndex],
+                    targetX: Double(targetX),
+                    targetY: Double(targetY)
+                )
+
+                ants[antIndex].energy = max(
+                    0.0,
+                    ants[antIndex].energy - movementEnergyCost
+                )
+
+            } else {
+
+                // The ant has reached the invader.
+                resolveAntDefensiveContact(
+                    antIndex: antIndex,
+                    targetID: targetID
                 )
             }
         }
     }
-
     private func moveDefender(
         antIndex: Int
     ) {
@@ -3449,103 +3834,102 @@ extension AntColonySimulation {
 
     // MARK: Contact Resolution
 
-    private func resolveDefensiveContacts() {
+    private func resolveAntDefensiveContact(
+        antIndex: Int,
+        targetID: UUID
+    ) {
 
-        guard !invaders.isEmpty else {
+        guard ants.indices.contains(antIndex) else {
             return
         }
 
-        for invaderIndex in
-            invaders.indices {
-
-            guard
-                invaders[invaderIndex].alive
-            else {
-                continue
+        guard let invaderIndex = invaders.firstIndex(
+            where: {
+                $0.id == targetID &&
+                $0.alive &&
+                $0.health > 0.0
             }
+        )
+        else {
+            ants[antIndex].defending = false
+            ants[antIndex].defenseTargetID = nil
+            ants[antIndex].state = .searching
+            return
+        }
 
-            let invader =
-                invaders[invaderIndex]
+        let antX = ants[antIndex].x
+        let antY = ants[antIndex].y
 
-            var nearbyDefenders = 0
+        let invaderX = Int(
+            invaders[invaderIndex].x.rounded()
+        )
 
-            for ant in ants {
+        let invaderY = Int(
+            invaders[invaderIndex].y.rounded()
+        )
 
-                let distance =
-                    sqrt(
-                        pow(
-                            ant.x -
-                            invader.x,
-                            2
-                        )
-                        +
-                        pow(
-                            ant.y -
-                            invader.y,
-                            2
-                        )
-                    )
+        let contactDistance = distance(
+            x1: antX,
+            y1: antY,
+            x2: Double(invaderX),
+            y2: Double(invaderY)
+        )
 
-                if distance < 2.4 {
-                    nearbyDefenders += 1
-                }
-            }
+        guard contactDistance <= 1.0 else {
+            return
+        }
 
-            guard nearbyDefenders > 0 else {
-                continue
-            }
+        // Individual-ant defensive damage.
+        let baseDamage = 1.0
 
-            let localDefense =
-                min(
-                    1.0,
-                    Double(nearbyDefenders)
-                    / 8.0
-                )
+        // Nearby defensive CA strength amplifies the response.
+        let x = Int(
+            clamp(
+                invaders[invaderIndex].x.rounded(),
+                0.0,
+                99.0
+            )
+        )
 
-            let cellX =
-                Int(invader.x.rounded())
+        let y = Int(
+            clamp(
+                invaders[invaderIndex].y.rounded(),
+                0.0,
+                64.0
+            )
+        )
 
-            let cellY =
-                Int(invader.y.rounded())
+        let defenseIndex = indexFor(x, y)
 
-            var caDefense = 0.0
+        let defenseStrength =
+            defenseCells.indices.contains(defenseIndex)
+            ? defenseCells[defenseIndex].defenseStrength
+            : 0.0
 
-            if cellX >= 0,
-               cellX < width,
-               cellY >= 0,
-               cellY < height {
+        let damage =
+            baseDamage *
+            (1.0 + defenseStrength)
 
-                caDefense =
-                    defenseCells[
-                        indexFor(
-                            cellX,
-                            cellY
-                        )
-                    ].defenseStrength
-            }
+        invaders[invaderIndex].health = max(
+            0.0,
+            invaders[invaderIndex].health - damage
+        )
 
-            let damage =
-                (
-                    localDefense * 0.9
-                    +
-                    caDefense * 0.65
-                )
-                *
-                invader.type.threat
+        ants[antIndex].energy = max(
+            0.0,
+            ants[antIndex].energy - 0.5
+        )
 
-            invaders[invaderIndex].health -=
-                damage
+        // Keep attacking while the invader is alive.
+        if invaders[invaderIndex].health <= 0.0 {
 
-            if invaders[invaderIndex].health <= 0 {
+            invaders[invaderIndex].alive = false
 
-                invadersDefeated += 1
+            invadersDefeated += 1
 
-                reinforceDefenseAt(
-                    x: cellX,
-                    y: cellY,
-                    amount: 0.30
-                )
-            }
+            ants[antIndex].defending = false
+            ants[antIndex].defenseTargetID = nil
+            ants[antIndex].state = .searching
         }
     }
 
