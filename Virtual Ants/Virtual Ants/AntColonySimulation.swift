@@ -455,7 +455,9 @@ final class AntColonySimulation: ObservableObject {
                 x: location.x,
                 y: location.y,
                 type: type,
-                amount: amount
+                amount: amount,
+                maximumAmount: amount,
+                regenerationRate: max(0.5, amount * 0.02)
             )
         )
 

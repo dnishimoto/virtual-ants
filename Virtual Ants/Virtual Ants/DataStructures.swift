@@ -101,19 +101,41 @@ enum AntState {
 }
 // MARK: - Food Source
 
+
 struct FoodSource: Identifiable {
     let id = UUID()
 
     var x: Int
     var y: Int
-
     var type: FoodType
+
+    /// Current available food.
     var amount: Double
 
+    /// Maximum amount this source can hold.
+    var maximumAmount: Double
+
+    /// Food regenerated per simulation step.
+    var regenerationRate: Double
+
+    /// Whether the source has effectively run out of food.
     var depleted: Bool {
         amount <= 0.01
     }
+
+    /// Replenishes the source without exceeding its capacity.
+    mutating func regenerate(populationFactor: Double = 1.0) {
+        guard maximumAmount > 0 else { return }
+
+        let rate = max(0.0, regenerationRate) * max(1.0, populationFactor)
+
+        amount = min(
+            maximumAmount,
+            amount + rate
+        )
+    }
 }
+
 
 // MARK: - Ant
 
