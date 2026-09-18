@@ -13,13 +13,15 @@ import Combine
 
 @MainActor
 final class AntColonySimulation: ObservableObject {
+    @Published var colonyAlarm = 0.0
     
     let detectionRadius = 20.0
+    let breachRadius = 10.0
     let recruitmentRadius = 8.0
     
     private let movementEnergyCost = 0.45
     
-    let spawnChance = 0.50
+    let spawnChance = 0.75
     
     private var defenseStepCounter = 0
     
@@ -97,7 +99,7 @@ final class AntColonySimulation: ObservableObject {
     let maximumPopulation = 1000
 
     // Maximum number of food patches outside the colony.
-    private let maximumFoodSources = 25
+    private let maximumFoodSources = 50
 
     private var nextFoodGeneration = 1
 
@@ -306,81 +308,70 @@ final class AntColonySimulation: ObservableObject {
     // MARK: Food Generation
 
     private func generateFoodIfNeeded() {
-
         guard generation >= nextFoodGeneration else {
             return
         }
 
-        guard foodSources.count <
-                maximumFoodSources
-        else {
-            nextFoodGeneration =
-                generation +
-                Int.random(in: 8...18)
+        let population = max(ants.count, 1)
 
-            return
-        }
-
-        let populationDemand =
+        // Target enough food sources to support continued feeding
+        // and reproduction as the colony grows.
+        let targetFoodSources = min(
+            maximumFoodSources,
             max(
-                1,
-                min(
-                    5,
-                    Int(
-                        ceil(
-                            Double(
-                                max(
-                                    ants.count,
-                                    1
-                                )
-                            ) /
-                            Double(
-                                initialPopulation
-                            )
-                        )
+                8,
+                Int(
+                    ceil(
+                        Double(population) / 30.0
                     )
                 )
             )
+        )
 
-        let lower =
-            max(
-                1,
-                populationDemand - 1
+        let sourcesNeeded = max(
+            0,
+            targetFoodSources - foodSources.count
+        )
+
+        // If the colony is below its food target, replenish immediately.
+        if sourcesNeeded > 0 {
+            let minimumBatch = min(
+                sourcesNeeded,
+                max(2, Int(ceil(Double(population) / 60.0)))
             )
 
-        let upper =
-            min(
-                5,
-                populationDemand + 1
+            let maximumBatch = min(
+                sourcesNeeded,
+                max(
+                    minimumBatch,
+                    Int(ceil(Double(population) / 30.0))
+                )
             )
 
-        let sourceCount =
-            Int.random(
-                in: lower...upper
+            let sourceCount = Int.random(
+                in: minimumBatch...maximumBatch
             )
 
-        for _ in 0..<sourceCount {
+            for _ in 0..<sourceCount {
+                guard foodSources.count < maximumFoodSources else {
+                    break
+                }
 
-            guard foodSources.count <
-                    maximumFoodSources
-            else {
-                break
+                createFoodSource()
             }
-
-            createFoodSource()
         }
 
-        let intervalLow =
-            max(
-                7,
-                20 - ants.count / 80
-            )
+        // Keep food replenishment frequent enough that population growth
+        // does not outrun the food supply.
+        let intervalLow = max(
+            3,
+            10 - population / 100
+        )
 
-        let intervalHigh =
-            max(
-                intervalLow + 3,
-                32 - ants.count / 60
-            )
+        let intervalHigh = max(
+            intervalLow + 2,
+            16 - population / 120
+        )
 
         nextFoodGeneration =
             generation +
@@ -388,7 +379,6 @@ final class AntColonySimulation: ObservableObject {
                 in: intervalLow...intervalHigh
             )
     }
-
     private func createFoodSource() {
 
         guard let location =
@@ -594,7 +584,7 @@ final class AntColonySimulation: ObservableObject {
         // Existing simulation work.
         defenseStepCounter += 1
 
-        if defenseStepCounter >= 10 {
+        if defenseStepCounter >= 3 {
             defenseStepCounter = 0
             stepDefenseSystem()
         }
@@ -2886,6 +2876,8 @@ extension AntColonySimulation {
         updateInvaderOccupancy()
 
         propagateThreat()
+        
+        calculateColonyThreat()
 
         updateDefensiveSignals()
 
@@ -3027,10 +3019,7 @@ extension AntColonySimulation {
             return
         }
 
-        guard Double.random(in: 0...1) < spawnChance else {
-              return
-          }
-
+    
         let colonyPressure = min(
             1.0,
             Double(ants.count) /
@@ -3325,27 +3314,27 @@ extension AntColonySimulation {
     // MARK: Alarm Signal
 
     private func updateDefensiveSignals() {
-
         var totalAlarm = 0.0
+        var activeAlarm = 0.0
+        var activeAlarmCells = 0
 
         for y in 0..<height {
-
             for x in 0..<width {
+                let index = indexFor(x, y)
 
-                let index =
-                    indexFor(x, y)
-
-                let localThreat =
-                    defenseCells[index].threat
+                let localThreat = min(
+                    1.0,
+                    max(
+                        0.0,
+                        defenseCells[index].threat
+                    )
+                )
 
                 var neighboringAlarm = 0.0
 
                 for dy in -1...1 {
-
                     for dx in -1...1 {
-
-                        if dx == 0 &&
-                            dy == 0 {
+                        if dx == 0 && dy == 0 {
                             continue
                         }
 
@@ -3378,25 +3367,62 @@ extension AntColonySimulation {
                     )
                 )
 
-                defenseCells[index].alarm =
-                    alarm
+                defenseCells[index].alarm = alarm
 
                 totalAlarm += alarm
+
+                if alarm > 0.01 {
+                    activeAlarm += alarm
+                    activeAlarmCells += 1
+                }
             }
         }
 
-        defensiveAlarm =
-            min(
-                1.0,
-                totalAlarm /
-                Double(
-                    max(
-                        1,
-                        cells.count
-                    )
+        // Existing colony-wide alarm normalized across
+        // the entire cellular-automaton grid.
+        defensiveAlarm = min(
+            1.0,
+            totalAlarm /
+            Double(
+                max(
+                    1,
+                    cells.count
                 )
-                * 8.0
             )
+            * 8.0
+            +
+            colonyAlarm * 0.50
+        )*100.0
+
+    
+    }
+    private func calculateColonyThreat() {
+        var totalThreat = 0.0
+        var threatenedCells = 0
+
+        for cell in defenseCells {
+            let threat = min(
+                1.0,
+                max(0.0, cell.threat)
+            )
+
+            guard threat > 0.01 else {
+                continue
+            }
+
+            totalThreat += threat
+            threatenedCells += 1
+        }
+
+        if threatenedCells > 0 {
+            colonyAlarm = min(
+                1.0,
+                totalThreat /
+                Double(threatenedCells)
+            )
+        } else {
+            colonyAlarm = 0.0
+        }
     }
     private func distance(
         x1: Double,
@@ -4107,7 +4133,7 @@ extension AntColonySimulation {
 
      
             
-            if distance < detectionRadius {
+            if distance < breachRadius {
                 breachCount += 1
             }
         }
