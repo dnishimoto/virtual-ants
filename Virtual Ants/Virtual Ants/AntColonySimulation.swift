@@ -13,6 +13,12 @@ import Combine
 
 @MainActor
 final class AntColonySimulation: ObservableObject {
+    
+    private let lowEnergyReturnThreshold = 30.0
+    private let recoveredEnergyThreshold = 75.0
+    private let maximumFoodPerRecoveryStep = 2.0
+    private let personalEnergyPerFoodUnit = 7.0
+    
     var broodCareLevel: Double {
         let foodRatio = storedFood / max(storageCapacity, 1.0)
 
@@ -251,8 +257,84 @@ final class AntColonySimulation: ObservableObject {
 
         updateStorageCapacity()
     }
+    private func feedAntFromStoredFood(index: Int) {
+        guard ants.indices.contains(index) else {
+            return
+        }
 
-    // MARK: Initial Colony
+        guard isInsideNest(
+            x: ants[index].x,
+            y: ants[index].y
+        ) else {
+            return
+        }
+
+        guard ants[index].energy < recoveredEnergyThreshold else {
+            return
+        }
+
+        guard storedFood > 0 else {
+            return
+        }
+
+        let energyNeeded = recoveredEnergyThreshold - ants[index].energy
+
+        let foodNeeded = energyNeeded / personalEnergyPerFoodUnit
+
+        let foodConsumed = min(
+            maximumFoodPerRecoveryStep,
+            foodNeeded,
+            storedFood
+        )
+
+        guard foodConsumed > 0 else {
+            return
+        }
+
+        storedFood -= foodConsumed
+
+        ants[index].energy = min(
+            100,
+            ants[index].energy +
+            foodConsumed * personalEnergyPerFoodUnit
+        )
+    }
+    private func moveAntToNestForFood(index: Int) {
+        guard ants.indices.contains(index) else {
+            return
+        }
+
+        let ant = ants[index]
+
+        let dx = Double(nestCenterX) - ant.x
+        let dy = Double(nestCenterY) - ant.y
+
+        let distance = max(
+            0.001,
+            sqrt(dx * dx + dy * dy)
+        )
+
+        let trail = nestDirection(for: ant)
+
+        let direction = normalized(
+            x: dx / distance * 0.85 + trail.x * 0.15,
+            y: dy / distance * 0.85 + trail.y * 0.15
+        )
+
+        moveAntSafely(
+            index: index,
+            directionX: direction.x,
+            directionY: direction.y,
+            speed: 0.55
+        )
+
+        if isInsideNest(
+            x: ants[index].x,
+            y: ants[index].y
+        ) {
+            ants[index].state = .resting
+        }
+    }
 
     private func createInitialColony() {
 
@@ -691,21 +773,27 @@ final class AntColonySimulation: ObservableObject {
                     )
                 )
 
-            ants[i].energy -=
-                movementCost(
-                    state:
-                        ants[i].state,
-                    density:
-                        density,
-                    populationPressure:
-                        populationPressure
+            ants[i].energy =
+                max(
+                    0,
+                    ants[i].energy -
+                    movementCost(
+                        state:
+                            ants[i].state,
+                        density:
+                            density,
+                        populationPressure:
+                            populationPressure
+                    )
                 )
 
             if ants[i].energy <= 0 {
                 continue
             }
 
-            // Returning workers take food to storage.
+            // Food-carrying ants always return their food to the nest first.
+            // This prevents an ant from consuming colony storage before it
+            // has delivered the food it is already carrying.
             if ants[i].hasFood {
 
                 ants[i].state =
@@ -718,8 +806,83 @@ final class AntColonySimulation: ObservableObject {
                 continue
             }
 
-            // Construction workers emerge naturally
-            // when the colony requires expansion.
+            // A worker with low personal energy abandons its current non-food
+            // task and returns to the colony to eat from stored food.
+            if ants[i].energy <= lowEnergyReturnThreshold,
+               ants[i].state != .returningForFood {
+
+                ants[i].defending = false
+                ants[i].defenseTargetID = nil
+
+                ants[i].state =
+                    .returningForFood
+            }
+
+            // Hungry ants travel directly back to the colony until they are
+            // inside the nest. The helper changes their state to .resting
+            // after they arrive.
+            if ants[i].state == .returningForFood {
+
+                moveAntToNestForFood(
+                    index: i
+                )
+
+                continue
+            }
+
+            // Resting ants recover only when inside the nest. They consume
+            // storedFood through feedAntFromStoredFood(index:), then gain a
+            // small passive rest bonus.
+            if ants[i].state == .resting {
+
+                if isInsideNest(
+                    x: ants[i].x,
+                    y: ants[i].y
+                ) {
+
+                    feedAntFromStoredFood(
+                        index: i
+                    )
+
+                    ants[i].energy =
+                        min(
+                            100,
+                            ants[i].energy + 0.20
+                        )
+
+                    // Only recovered ants return to foraging duty.
+                    if ants[i].energy >= recoveredEnergyThreshold,
+                       Double.random(
+                        in: 0...1
+                       ) < 0.025 {
+
+                        ants[i].state =
+                            .searching
+                    }
+                } else {
+
+                    // An ant cannot recover while resting outside the colony.
+                    // Send it home instead of letting it become stranded.
+                    ants[i].state =
+                        .returningForFood
+                }
+
+                continue
+            }
+
+            // Defenders remain under control of the defense system. This
+            // prevents ordinary construction/search behavior from overwriting
+            // their defensive assignment.
+            if ants[i].defending {
+
+                ants[i].state =
+                    .defending
+
+                continue
+            }
+
+            // Construction workers emerge naturally when the colony requires
+            // expansion. Hungry workers have already been redirected home.
             if shouldConstruct(
                 ant: ants[i]
             ) {
@@ -734,31 +897,7 @@ final class AntColonySimulation: ObservableObject {
                 continue
             }
 
-            if ants[i].state == .resting {
-
-                if isInsideNest(
-                    x: ants[i].x,
-                    y: ants[i].y
-                ) {
-
-                    ants[i].energy =
-                        min(
-                            100,
-                            ants[i].energy + 0.10
-                        )
-                }
-
-                if Double.random(
-                    in: 0...1
-                ) < 0.025 {
-
-                    ants[i].state =
-                        .searching
-                }
-
-                continue
-            }
-
+            // Collect nearby food before continuing ordinary searching behavior.
             if let foodIndex =
                 foodAt(
                     x: ants[i].x,
@@ -781,7 +920,6 @@ final class AntColonySimulation: ObservableObject {
 
         removeDeadAnts()
     }
-
     // MARK: Searching
 
     private func moveSearchingAnt(
@@ -1597,7 +1735,7 @@ final class AntColonySimulation: ObservableObject {
 
         let energyPerAnt = colonyEnergy / Double(max(ants.count, 1))
 
-        guard energyPerAnt >= 3.5 else { return }
+        guard energyPerAnt >= 1.5 else { return }
 
         // Storage changes how much of the colony can focus on brood care.
         //
@@ -1625,7 +1763,7 @@ final class AntColonySimulation: ObservableObject {
 
         // Baseline reproduction exists once the colony has minimum reserves.
         // The broodCareFactor adds a substantial benefit for well-stocked nests.
-        let baseReproductionRate = 0.008
+        let baseReproductionRate = 0.016
         let maximumBroodCareBonus = 0.105
 
         let reproductionRate = min(
@@ -1749,7 +1887,13 @@ final class AntColonySimulation: ObservableObject {
             base = 0.42
 
         case .returning:
+            // Ant is carrying food back along a known route.
             base = 0.28
+
+        case .returningForFood:
+            // Hungry worker heads directly back to the nest. This is cheaper
+            // than searching but still costs energy while traveling home.
+            base = 0.24
 
         case .resting:
             base = 0.05

@@ -95,6 +95,7 @@ enum AntState {
     case searching
     case exploring
     case returning
+    case returningForFood
     case resting
     case building
     case defending
