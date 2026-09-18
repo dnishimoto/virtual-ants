@@ -224,59 +224,63 @@ func vitalIndicator(
 // MARK: - Population
 
 private extension ContentView {
-
-var populationPanel: some View {
-
-    VStack(
-        alignment: .leading,
-        spacing: 9
-    ) {
-
-        HStack {
-
-            Text("Population")
-                .font(.headline)
-
-            Spacer()
-
-            Text(
-                "\(simulation.ants.count)"
+    
+    
+    var populationPanel: some View {
+        VStack(
+            alignment: .leading,
+            spacing: 9
+        ) {
+            // Population + Food Storage on the same row
+            HStack {
+                HStack(spacing: 6) {
+                    Text("Population")
+                        .font(.headline)
+                    
+                    Text("\(simulation.ants.count)")
+                        .font(.headline.monospacedDigit())
+                }
+                
+                Spacer()
+                
+                HStack(spacing: 4) {
+                    Image(systemName: "archivebox.fill")
+                        .foregroundColor(.yellow)
+                    
+                    Text(
+                        "\(Int(simulation.storedFood))/\(Int(simulation.storageCapacity))"
+                    )
+                    .font(.headline.monospacedDigit())
+                    .foregroundColor(.secondary)
+                }
+                .fixedSize()
+            }
+            
+            ProgressView(
+                value: simulation.populationProgress
             )
-            .font(
-                .headline.monospacedDigit()
-            )
+            
+            HStack {
+                Text("Initial: 250")
+                
+                Spacer()
+                
+                Text("Maximum: 1,000")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
-
-        ProgressView(
-            value: simulation.populationProgress
+        .padding()
+        .background(
+            RoundedRectangle(
+                cornerRadius: 14
+            )
+            .fill(
+                Color.white.opacity(0.06)
+            )
         )
-
-        HStack {
-
-            Text("Initial: 250")
-
-            Spacer()
-
-            Text("Maximum: 1,000")
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
     }
-    .padding()
-    .background(
-        RoundedRectangle(
-            cornerRadius: 14
-        )
-        .fill(
-            Color.white.opacity(0.06)
-        )
-    )
 }
-
-}
-
-// MARK: - Invader Threat
-
 private extension ContentView {
 
 var invaderThreatPanel: some View {

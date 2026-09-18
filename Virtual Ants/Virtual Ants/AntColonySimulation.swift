@@ -45,7 +45,7 @@ final class AntColonySimulation: ObservableObject {
 
     private var defenseInitialized = false
 
-    private var nextInvaderGeneration: Int = 5
+    private var nextInvaderGeneration: Int = 2
 
     private let maximumInvaders = 12
 
@@ -3029,9 +3029,9 @@ extension AntColonySimulation {
             return
         }
         
-        guard defenseGeneration >= nextInvaderGeneration else {
+       /* guard defenseGeneration >= nextInvaderGeneration else {
                return
-           }
+           }*/
     
         let colonyPressure = min(
             1.0,
