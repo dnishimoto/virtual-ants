@@ -3129,5 +3129,33 @@ struct AntColony3DView: UIViewRepresentable {
             lastAntPositions.removeAll()
             lastInvaderPositions.removeAll()
         }
+
+        // MARK: - Testing Support
+        //
+        // Minimal, read-only hooks so unit tests can verify that
+        // invaders are actually present in the SceneKit graph
+        // without exposing internal rendering state in release
+        // builds.
+        #if DEBUG
+
+        var debugInvaderSceneNode: SCNNode {
+            invaderNode
+        }
+
+        var debugInvaderNodeCount: Int {
+            invaderNode.childNodes.count
+        }
+
+        var debugTrackedInvaderIDs: Set<UUID> {
+            Set(invaderNodes.keys)
+        }
+
+        func debugInvaderNode(
+            for id: UUID
+        ) -> SCNNode? {
+            invaderNodes[id]
+        }
+
+        #endif
     }
 }

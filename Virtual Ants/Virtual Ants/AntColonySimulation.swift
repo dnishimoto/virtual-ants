@@ -13,7 +13,25 @@ import Combine
 
 @MainActor
 final class AntColonySimulation: ObservableObject {
-    private let reproductionInterval = 7
+    var broodCareLevel: Double {
+        let foodRatio = storedFood / max(storageCapacity, 1.0)
+
+        switch foodRatio {
+        case ..<0.15:
+            return 0.10
+
+        case 0.15..<0.45:
+            return 0.40
+
+        case 0.45..<0.75:
+            return 0.75
+
+        default:
+            return 1.0
+        }
+    }
+    
+    private let reproductionInterval = 3
     
     @Published var colonyAlarm = 0.0
     
@@ -68,7 +86,7 @@ final class AntColonySimulation: ObservableObject {
     @Published var colonyEnergy: Double = 0.0
 
     // Physical food stored inside the colony.
-    @Published var storedFood: Double = 0.0
+    @Published var storedFood: Double = 250.0
 
     // Maximum physical food the current nest can store.
     @Published var storageCapacity: Double = 100.0
@@ -1509,198 +1527,191 @@ final class AntColonySimulation: ObservableObject {
     // MARK: Stored Food → Energy
 
     private func convertStoredFoodToEnergy() {
+        guard storedFood > 0 else { return }
 
-        guard storedFood > 0 else {
-            return
+        let foodRatio = storedFood / max(storageCapacity, 1.0)
+
+        // Keep a protected reserve for brood care. The colony only converts
+        // food above this reserve freely into general colony energy.
+        let protectedBroodReserve: Double
+
+        switch foodRatio {
+        case ..<0.20:
+            protectedBroodReserve = storedFood * 0.85
+
+        case 0.20..<0.50:
+            protectedBroodReserve = storageCapacity * 0.12
+
+        default:
+            protectedBroodReserve = storageCapacity * 0.20
         }
 
-        // Stored food is gradually metabolized.
-        // This provides the colony's usable energy.
-        let consumptionRate =
-            min(
-                storedFood,
-                Double(
-                    ants.count
-                ) * 0.018
-            )
+        let foodAvailableForEnergy = max(
+            0,
+            storedFood - protectedBroodReserve
+        )
 
-        storedFood -=
-            consumptionRate
+        guard foodAvailableForEnergy > 0 else { return }
 
-        // Average stored food is treated as
-        // moderate-energy colony nutrition.
-        colonyEnergy +=
-            consumptionRate * 7.0
+        let populationDemand = Double(ants.count) * 0.005
 
-        colonyEnergy =
-            min(
-                colonyEnergy,
-                100_000
-            )
+        // At most 2% of stored food is converted per simulation generation.
+        // This is lower than the prior 5% cap so reserves can remain stable
+        // and genuinely support brood care.
+        let percentageCap = storedFood * 0.02
+
+        let consumptionRate = min(
+            foodAvailableForEnergy,
+            percentageCap,
+            populationDemand
+        )
+
+        storedFood = max(
+            0,
+            storedFood - consumptionRate
+        )
+
+        colonyEnergy = min(
+            100_000,
+            colonyEnergy + consumptionRate * 7.0
+        )
     }
-
     private func populationDynamics() {
-
-        // Reproduction is evaluated according to the configured
-        // reproduction interval rather than every generation.
-        guard generation % reproductionInterval == 0 else {
-            return
-        }
+        // Reproduction happens on the configured cycle, not every generation.
+        guard generation % reproductionInterval == 0 else { return }
 
         // Do not reproduce beyond the colony population limit.
-        guard ants.count < maximumPopulation else {
-            return
-        }
+        guard ants.count < maximumPopulation else { return }
 
-        // -------------------------------------------------
-        // REPRODUCTION IS DIRECTLY CONTROLLED BY
-        // PHYSICAL FOOD STORAGE.
-        // -------------------------------------------------
-
+        // Stored food is the colony's brood-care reserve.
+        // With no meaningful reserve, workers must concentrate on foraging
+        // rather than caring for eggs and larvae.
         let minimumFoodForBreeding = 4.0
 
-        guard storedFood >= minimumFoodForBreeding else {
-            return
+        guard storedFood >= minimumFoodForBreeding else { return }
+
+        let foodRatio = min(
+            1.0,
+            storedFood / max(storageCapacity, 1.0)
+        )
+
+        let energyPerAnt = colonyEnergy / Double(max(ants.count, 1))
+
+        guard energyPerAnt >= 3.5 else { return }
+
+        // Storage changes how much of the colony can focus on brood care.
+        //
+        // 0.00...0.15: food-stressed; no additional brood-care benefit.
+        // 0.15...0.45: modest care capacity.
+        // 0.45...0.75: secure reserves; strong brood care.
+        // 0.75...1.00: abundant reserve; maximum care capacity.
+        let broodCareFactor: Double
+
+        switch foodRatio {
+        case ..<0.15:
+            broodCareFactor = 0.0
+
+        case 0.15..<0.45:
+            let progress = (foodRatio - 0.15) / 0.30
+            broodCareFactor = 0.25 + progress * 0.35
+
+        case 0.45..<0.75:
+            let progress = (foodRatio - 0.45) / 0.30
+            broodCareFactor = 0.60 + progress * 0.30
+
+        default:
+            broodCareFactor = 1.0
         }
 
-        // Food-storage health.
-        let foodRatio =
-            min(
-                1.0,
-                storedFood /
-                max(
-                    storageCapacity,
-                    1
-                )
-            )
+        // Baseline reproduction exists once the colony has minimum reserves.
+        // The broodCareFactor adds a substantial benefit for well-stocked nests.
+        let baseReproductionRate = 0.008
+        let maximumBroodCareBonus = 0.105
 
-        // Colony energy available per ant.
-        let energyPerAnt =
-            colonyEnergy /
-            Double(
-                max(
-                    ants.count,
-                    1
-                )
-            )
+        let reproductionRate = min(
+            0.113,
+            baseReproductionRate +
+            broodCareFactor * maximumBroodCareBonus
+        )
 
-        guard energyPerAnt > 3.5 else {
-            return
+        // Calculate births requested this cycle.
+        let requestedBirths = max(
+            1,
+            Int((Double(ants.count) * reproductionRate).rounded(.down))
+        )
+
+        let availableSlots = maximumPopulation - ants.count
+
+        let birthCount = min(
+            requestedBirths,
+            availableSlots
+        )
+
+        guard birthCount > 0 else { return }
+
+        // Better reserves make brood rearing more efficient:
+        // caretakers do not need to abandon the brood to forage, so the
+        // resource cost per successfully raised worker falls.
+        let foodCostPerBirth: Double
+
+        switch foodRatio {
+        case ..<0.25:
+            foodCostPerBirth = 8.0
+
+        case 0.25..<0.50:
+            foodCostPerBirth = 6.5
+
+        case 0.50..<0.75:
+            foodCostPerBirth = 5.0
+
+        default:
+            foodCostPerBirth = 4.0
         }
 
-        // -------------------------------------------------
-        // REPRODUCTION RATE
-        // -------------------------------------------------
-        // Birth rate increases as food storage becomes
-        // healthier, up to the configured maximum.
-        // -------------------------------------------------
+        // Food availability can limit the planned birth count.
+        let birthsAffordableByStorage = Int(
+            storedFood / foodCostPerBirth
+        )
 
-        let reproductionRate =
-            min(
-                0.085,
-                0.010 +
-                foodRatio * 0.075
-            )
+        let affordableBirthCount = min(
+            birthCount,
+            birthsAffordableByStorage
+        )
 
-        // Calculate the number of workers requested
-        // during this reproduction cycle.
-        let requestedBirths =
-            max(
-                1,
-                Int(
-                    Double(
-                        ants.count
-                    ) *
-                    reproductionRate
-                )
-            )
+        guard affordableBirthCount > 0 else { return }
 
-        // Never exceed the colony population capacity.
-        let availableSlots =
-            maximumPopulation -
-            ants.count
+        let totalFoodCost = Double(affordableBirthCount) * foodCostPerBirth
 
-        let birthCount =
-            min(
-                requestedBirths,
-                availableSlots
-            )
+        storedFood = max(
+            0,
+            storedFood - totalFoodCost
+        )
 
-        // -------------------------------------------------
-        // FOOD COST
-        // -------------------------------------------------
+        // A small amount of immediate colony energy represents heating,
+        // tending, grooming, and maintaining the brood chamber.
+        let energyCostPerBirth = 1.5
+        colonyEnergy = max(
+            0,
+            colonyEnergy - Double(affordableBirthCount) * energyCostPerBirth
+        )
 
-        let foodCostPerBirth = 7.0
-
-        let totalFoodCost =
-            Double(
-                birthCount
-            ) *
-            foodCostPerBirth
-
-        guard storedFood >= totalFoodCost else {
-            return
-        }
-
-        // Consume the food required to produce
-        // the new workers.
-        storedFood -= totalFoodCost
-
-        // -------------------------------------------------
-        // CREATE NEW WORKERS
-        // -------------------------------------------------
-
-        for _ in 0..<birthCount {
-
-            let angle =
-                Double.random(
-                    in: 0...(Double.pi * 2)
-                )
-
-            let radius =
-                Double.random(
-                    in: 1...5
-                )
+        for _ in 0..<affordableBirthCount {
+            let angle = Double.random(in: 0...(Double.pi * 2))
+            let radius = Double.random(in: 1...5)
 
             ants.append(
                 Ant(
-                    x:
-                        Double(
-                            nestCenterX
-                        ) +
-                        cos(angle) *
-                        radius,
-
-                    y:
-                        Double(
-                            nestCenterY
-                        ) +
-                        sin(angle) *
-                        radius,
-
-                    state:
-                        .resting,
-
-                    energy:
-                        Double.random(
-                            in: 75...95
-                        ),
-
-                    pheromoneSensitivity:
-                        Double.random(
-                            in: 0.8...1.2
-                        ),
-
-                    explorationBias:
-                        Double.random(
-                            in: 0.8...1.2
-                        )
+                    x: Double(nestCenterX) + cos(angle) * radius,
+                    y: Double(nestCenterY) + sin(angle) * radius,
+                    state: .resting,
+                    energy: Double.random(in: 78...96),
+                    pheromoneSensitivity: Double.random(in: 0.8...1.2),
+                    explorationBias: Double.random(in: 0.8...1.2)
                 )
             )
         }
 
-        // Record the number of successful births.
-        births += birthCount
+        births += affordableBirthCount
     }
 
 
@@ -3039,7 +3050,7 @@ extension AntColonySimulation {
             Double(maximumPopulation)
         )
 
-        let baseChance = 0.08 + colonyPressure * 0.12
+        let baseChance = 0.02 + colonyPressure * 0.02
 
         guard Double.random(in: 0...1) < baseChance else {
             nextInvaderGeneration =
@@ -4324,5 +4335,4 @@ extension AntColonySimulation {
         return "ALERT"
     }
 }
-
 
