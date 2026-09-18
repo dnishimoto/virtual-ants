@@ -19,7 +19,7 @@ final class AntColonySimulation: ObservableObject {
     
     let detectionRadius = 20.0
     let breachRadius = 10.0
-    let recruitmentRadius = 8.0
+    let recruitmentRadius = 11.0
     
     private let movementEnergyCost = 0.45
     
@@ -101,7 +101,7 @@ final class AntColonySimulation: ObservableObject {
     let maximumPopulation = 1000
 
     // Maximum number of food patches outside the colony.
-    private let maximumFoodSources = 50
+    private let maximumFoodSources = 70
 
     private var nextFoodGeneration = 1
 
@@ -417,7 +417,7 @@ final class AntColonySimulation: ObservableObject {
 
             amount =
                 Double.random(
-                    in: 30...85
+                    in: 40...115
                 ) *
                 populationFactor
 
@@ -425,7 +425,7 @@ final class AntColonySimulation: ObservableObject {
 
             amount =
                 Double.random(
-                    in: 15...50
+                    in: 20...68
                 ) *
                 populationFactor
 
@@ -433,7 +433,7 @@ final class AntColonySimulation: ObservableObject {
 
             amount =
                 Double.random(
-                    in: 5...22
+                    in: 7...30
                 ) *
                 populationFactor
 
@@ -441,7 +441,7 @@ final class AntColonySimulation: ObservableObject {
 
             amount =
                 Double.random(
-                    in: 20...65
+                    in: 27...88
                 ) *
                 populationFactor
         }
@@ -1597,9 +1597,9 @@ final class AntColonySimulation: ObservableObject {
 
         let reproductionRate =
             min(
-                0.035,
-                0.004 +
-                foodRatio * 0.030
+                0.055,
+                0.006 +
+                foodRatio * 0.049
             )
 
         // Calculate the number of workers requested
@@ -1630,7 +1630,7 @@ final class AntColonySimulation: ObservableObject {
         // FOOD COST
         // -------------------------------------------------
 
-        let foodCostPerBirth = 12.0
+        let foodCostPerBirth = 9.0
 
         let totalFoodCost =
             Double(
@@ -1989,13 +1989,13 @@ final class AntColonySimulation: ObservableObject {
 
         // Base nest storage.
         let base =
-            100.0
+            150.0
 
         // Each storage chamber adds real capacity.
         let chamberCapacity =
             Double(
                 storageCells
-            ) * 45.0
+            ) * 65.0
 
         storageCapacity =
             base +
@@ -2922,7 +2922,7 @@ extension AntColonySimulation {
         }
 
         let contactDistance = 1.0
-        let baseDamage = 1.0
+        let baseDamage = 2.5
 
         for antIndex in ants.indices {
 
@@ -3141,7 +3141,7 @@ extension AntColonySimulation {
                 )
             )
 
-            guard distanceFromNest > 18 else {
+            guard distanceFromNest > 13 else {
                 continue
             }
 
@@ -3857,8 +3857,22 @@ extension AntColonySimulation {
             invaders[index].directionY =
                 directionY
 
+            // Invaders ease into the colony rather than
+            // arriving at full speed the instant they spawn,
+            // but ramp up quickly enough to actually reach
+            // visible range in a reasonable time.
+            let spawnRampSteps = 18.0
+
+            let spawnRamp =
+                min(
+                    1.0,
+                    Double(invaders[index].age) /
+                    spawnRampSteps
+                )
+
             let speed =
-                invaders[index].type.speed
+                invaders[index].type.speed *
+                (0.40 + 0.60 * spawnRamp)
 
             let newX =
                 invaders[index].x +
@@ -3940,7 +3954,7 @@ extension AntColonySimulation {
         }
 
         // Individual-ant defensive damage.
-        let baseDamage = 1.0
+        let baseDamage = 2.5
 
         // Nearby defensive CA strength amplifies the response.
         let x = Int(
@@ -4025,7 +4039,7 @@ extension AntColonySimulation {
                             defenseCells[index]
                                 .defenseStrength
                             +
-                            alarm * 0.08
+                            alarm * 0.16
                         )
                 }
 

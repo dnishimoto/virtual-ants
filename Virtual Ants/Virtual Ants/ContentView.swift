@@ -49,6 +49,7 @@ var body: some View {
                 showFood: showFood,
                 showAnts: showAnts,
                 showPheromones: showPheromones,
+                showInvaders: showInvaders,
                 cameraResetToken: cameraResetToken
             )
             .frame(
@@ -914,4 +915,5 @@ var developmentPanel: some View {
 #Preview {
 ContentView()
 }
+
 

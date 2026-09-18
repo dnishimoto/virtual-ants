@@ -20,7 +20,7 @@ struct AntColony3DView: UIViewRepresentable {
     let showFood: Bool
     let showAnts: Bool
     let showPheromones: Bool
-    let showInvaders: Bool = true
+    let showInvaders: Bool
     let cameraResetToken: UUID
 
     func makeCoordinator() -> Coordinator {
@@ -1071,10 +1071,14 @@ struct AntColony3DView: UIViewRepresentable {
 
             let health =
                 max(
-                    0,
+                    0.0,
                     min(
-                        1,
-                        invader.health
+                        1.0,
+                        invader.health /
+                        max(
+                            invader.type.health,
+                            0.01
+                        )
                     )
                 )
 
@@ -1086,9 +1090,9 @@ struct AntColony3DView: UIViewRepresentable {
 
             node.scale =
                 SCNVector3(
-                    0.75 + Float(health) * 0.25,
-                    0.75 + Float(health) * 0.25,
-                    0.75 + Float(health) * 0.25
+                    (0.95 + Float(health) * 0.25) * 1.3,
+                    (0.95 + Float(health) * 0.25) * 1.3,
+                    (0.95 + Float(health) * 0.25) * 1.3
                 )
 
             updateInvaderHealthIndicator(
@@ -1954,6 +1958,15 @@ struct AntColony3DView: UIViewRepresentable {
 
             material.shininess =
                 18
+
+            // A faint self-glow keeps invaders readable
+            // against the dark, foggy cutaway scene, since
+            // unlike ants they can spawn far from any light.
+            material.emission.contents =
+                diffuse.withAlphaComponent(0.55)
+
+            material.emission.intensity =
+                0.35
 
             return material
         }
