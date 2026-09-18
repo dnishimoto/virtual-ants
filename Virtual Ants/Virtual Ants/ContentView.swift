@@ -37,6 +37,8 @@ struct ContentView: View {
 
                 header
 
+                vitalsPanel
+
                 populationPanel
 
                 AntColony3DView(
@@ -160,6 +162,94 @@ private extension ContentView {
                 )
             }
         }
+    }
+}
+
+// MARK: - Vitals
+
+private extension ContentView {
+
+    var vitalsPanel: some View {
+
+        HStack(
+            spacing: 10
+        ) {
+
+            vitalIndicator(
+                title: "Births",
+                value: "\(simulation.births)",
+                systemImage: "arrow.up.circle.fill",
+                tint: .green
+            )
+
+            vitalIndicator(
+                title: "Deaths",
+                value: "\(simulation.deaths)",
+                systemImage: "arrow.down.circle.fill",
+                tint: .red
+            )
+        }
+    }
+
+    func vitalIndicator(
+        title: String,
+        value: String,
+        systemImage: String,
+        tint: Color
+    ) -> some View {
+
+        HStack(
+            spacing: 10
+        ) {
+
+            Image(
+                systemName: systemImage
+            )
+            .font(
+                .system(
+                    size: 22,
+                    weight: .semibold
+                )
+            )
+            .foregroundStyle(tint)
+
+            VStack(
+                alignment: .leading,
+                spacing: 2
+            ) {
+
+                Text(
+                    title.uppercased()
+                )
+                .font(
+                    .caption2.weight(.bold)
+                )
+                .foregroundStyle(.secondary)
+
+                Text(value)
+                    .font(
+                        .title3
+                            .weight(.bold)
+                            .monospacedDigit()
+                    )
+                    .foregroundStyle(.white)
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .frame(
+            maxWidth: .infinity
+        )
+        .background(
+            RoundedRectangle(
+                cornerRadius: 14
+            )
+            .fill(
+                Color.white.opacity(0.06)
+            )
+        )
     }
 }
 
@@ -443,18 +533,6 @@ private extension ContentView {
                 title: "Storage Chambers",
                 value:
                     "\(simulation.storageChambersBuilt)"
-            )
-
-            statistic(
-                title: "Births",
-                value:
-                    "\(simulation.births)"
-            )
-
-            statistic(
-                title: "Deaths",
-                value:
-                    "\(simulation.deaths)"
             )
 
             statistic(
