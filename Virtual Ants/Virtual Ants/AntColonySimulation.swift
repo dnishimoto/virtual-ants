@@ -13,6 +13,10 @@ import Combine
 
 @MainActor
 final class AntColonySimulation: ObservableObject {
+    
+    let detectionRadius = 20.0
+    let recruitmentRadius = 8.0
+    
     private let movementEnergyCost = 0.45
     
     let spawnChance = 0.50
@@ -3438,23 +3442,39 @@ extension AntColonySimulation {
     // MARK: Defender Recruitment
 
     private func recruitDefenders() {
-
         guard !invaders.isEmpty else {
             return
         }
 
-        let recruitmentRadius = 8.0
 
         for antIndex in ants.indices {
 
-            // Do not continuously retarget an ant that is already defending.
+            // If the ant is already defending, keep the assignment only
+            // while its target is still alive and present.
             if ants[antIndex].defending,
-               ants[antIndex].defenseTargetID != nil {
-                continue
+               let targetID = ants[antIndex].defenseTargetID {
+
+                let targetStillAlive = invaders.contains {
+                    $0.id == targetID &&
+                    $0.alive &&
+                    $0.health > 0.0
+                }
+
+                if targetStillAlive {
+                    continue
+                }
+
+                // Clear a stale defensive assignment.
+                ants[antIndex].defending = false
+                ants[antIndex].defenseTargetID = nil
+
+                if ants[antIndex].state == .defending {
+                    ants[antIndex].state = .exploring
+                }
             }
 
-            let antX = ants[antIndex].x
-            let antY = ants[antIndex].y
+            let antX = Double(ants[antIndex].x)
+            let antY = Double(ants[antIndex].y)
 
             var selectedInvader: ColonyInvader?
             var selectedDistance = Double.infinity
@@ -3462,25 +3482,20 @@ extension AntColonySimulation {
             for invader in invaders
             where invader.alive && invader.health > 0.0 {
 
-                let invaderX = Int(
-                    invader.x.rounded()
-                )
-
-                let invaderY = Int(
-                    invader.y.rounded()
-                )
-
+                // Use the actual invader position for distance.
                 let d = distance(
                     x1: antX,
                     y1: antY,
-                    x2: Double(invaderX),
-                    y2: Double(invaderY)
+                    x2: invader.x,
+                    y2: invader.y
                 )
 
                 guard d <= recruitmentRadius else {
                     continue
                 }
 
+                // Convert the continuous invader position to a valid
+                // cellular-automaton grid coordinate.
                 let invaderIndexX = Int(
                     clamp(
                         invader.x.rounded(),
@@ -3497,11 +3512,10 @@ extension AntColonySimulation {
                     )
                 )
 
-                let defenseIndex =
-                    indexFor(
-                        invaderIndexX,
-                        invaderIndexY
-                    )
+                let defenseIndex = indexFor(
+                    invaderIndexX,
+                    invaderIndexY
+                )
 
                 guard defenseCells.indices.contains(defenseIndex) else {
                     continue
@@ -3509,6 +3523,7 @@ extension AntColonySimulation {
 
                 let cell = defenseCells[defenseIndex]
 
+                // The invader must have generated a defensive signal.
                 guard cell.threat > 0.0 ||
                       cell.alarm > 0.0 ||
                       cell.defenderSignal > 0.0
@@ -3516,6 +3531,7 @@ extension AntColonySimulation {
                     continue
                 }
 
+                // Select the closest valid invader.
                 if d < selectedDistance {
                     selectedDistance = d
                     selectedInvader = invader
@@ -3526,6 +3542,7 @@ extension AntColonySimulation {
                 continue
             }
 
+            // Recruit this individual ant.
             ants[antIndex].defending = true
             ants[antIndex].defenseTargetID = target.id
             ants[antIndex].state = .defending
@@ -4073,37 +4090,32 @@ extension AntColonySimulation {
         }
     }
 
-    // MARK: Breach Detection
-
     private func calculateDefensiveAlarm() {
-
         var breachCount = 0
 
         for invader in invaders {
+            guard invader.alive && invader.health > 0.0 else {
+                continue
+            }
 
-            let distance =
-                sqrt(
-                    pow(
-                        invader.x -
-                        Double(nestCenterX),
-                        2
-                    )
-                    +
-                    pow(
-                        invader.y -
-                        Double(nestCenterY),
-                        2
-                    )
-                )
+            let dx = invader.x - Double(nestCenterX)
+            let dy = invader.y - Double(nestCenterY)
 
-            if distance < 8 {
+            let distance = sqrt(
+                dx * dx + dy * dy
+            )
+
+     
+            
+            if distance < detectionRadius {
                 breachCount += 1
             }
         }
 
-        invaderBreaches =
-            breachCount
+        invaderBreaches = breachCount
     }
+
+
 
     // MARK: Helpers
 
