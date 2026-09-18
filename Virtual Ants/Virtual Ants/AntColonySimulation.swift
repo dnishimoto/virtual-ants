@@ -2867,13 +2867,15 @@ extension AntColonySimulation {
     }
 
     // MARK: Defensive Step
-
     private func stepDefenseSystem() {
+
         initializeDefenseSystem()
 
         defenseGeneration += 1
 
         spawnInvadersIfNeeded()
+
+        moveInvaders()
 
         updateInvaderOccupancy()
 
@@ -2883,7 +2885,7 @@ extension AntColonySimulation {
 
         recruitDefenders()
 
-        moveInvaders()
+        moveDefendingAnts()
 
         resolveDefensiveContacts()
 
