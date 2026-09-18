@@ -13,6 +13,33 @@ import Combine
 
 @MainActor
 final class AntColonySimulation: ObservableObject {
+    
+    @Published var invaders: [ColonyInvader] = []
+
+    @Published var defenseCells: [DefenseCell] = []
+
+    @Published var defensiveAlarm: Double = 0.0
+
+    @Published var defendersActive: Int = 0
+
+    @Published var invadersDefeated: Int = 0
+
+    @Published var invaderBreaches: Int = 0
+
+    @Published var defenseGeneration: Int = 0
+
+    // MARK: Defensive Configuration
+
+    private var defenseInitialized = false
+
+    private var nextInvaderGeneration: Int = 20
+
+    private let maximumInvaders = 12
+
+    private let defenseActivationThreshold = 0.18
+
+    private let defenseCriticalThreshold = 0.72
+
 
     // MARK: Published State
 
@@ -2798,6 +2825,1050 @@ final class AntColonySimulation: ObservableObject {
                 value
             )
         )
+    }
+}
+
+@MainActor
+extension AntColonySimulation {
+
+    // MARK: Published Defensive State
+
+  
+    // MARK: Defensive Initialization
+
+    func initializeDefenseSystem() {
+
+        guard !defenseInitialized else {
+            return
+        }
+
+        defenseCells = Array(
+            repeating: DefenseCell(),
+            count: width * height
+        )
+
+        defenseInitialized = true
+    }
+
+    // MARK: Defensive Step
+
+    func stepDefenseSystem() {
+
+        initializeDefenseSystem()
+
+        defenseGeneration += 1
+
+        spawnInvadersIfNeeded()
+
+        updateInvaderOccupancy()
+
+        propagateThreat()
+
+        updateDefensiveSignals()
+
+        recruitDefenders()
+
+        moveInvaders()
+
+        resolveDefensiveContacts()
+
+        reinforceColony()
+
+        dissipateDefenseField()
+
+        removeDefeatedInvaders()
+
+        calculateDefensiveAlarm()
+    }
+
+    // MARK: Invader Generation
+
+    private func spawnInvadersIfNeeded() {
+
+        guard invaders.count < maximumInvaders else {
+            return
+        }
+
+        guard defenseGeneration >= nextInvaderGeneration else {
+            return
+        }
+
+        let colonyPressure = min(
+            1.0,
+            Double(ants.count) /
+            Double(maximumPopulation)
+        )
+
+        let baseChance = 0.08 + colonyPressure * 0.12
+
+        guard Double.random(in: 0...1) < baseChance else {
+            nextInvaderGeneration =
+                defenseGeneration +
+                Int.random(in: 15...35)
+
+            return
+        }
+
+        let count = defenseGeneration < 150
+            ? 1
+            : Int.random(in: 1...2)
+
+        for _ in 0..<count {
+
+            guard
+                let location = randomInvaderEntry()
+            else {
+                continue
+            }
+
+            let type = chooseInvaderType()
+
+            invaders.append(
+                ColonyInvader(
+                    type: type,
+                    x: location.x,
+                    y: location.y
+                )
+            )
+        }
+
+        nextInvaderGeneration =
+            defenseGeneration +
+            Int.random(in: 18...40)
+    }
+
+    private func chooseInvaderType() -> InvaderType {
+
+        let roll = Double.random(in: 0..<1)
+
+        if roll < 0.30 {
+            return .rivalAnt
+        }
+
+        if roll < 0.52 {
+            return .cockroach
+        }
+
+        if roll < 0.67 {
+            return .worm
+        }
+
+        if roll < 0.84 {
+            return .spider
+        }
+
+        return .mouse
+    }
+
+    private func randomInvaderEntry()
+        -> (x: Double, y: Double)? {
+
+        for _ in 0..<100 {
+
+            let edge = Int.random(in: 0..<4)
+
+            var x = 0
+            var y = 0
+
+            switch edge {
+
+            case 0:
+                x = Int.random(in: 2..<(width - 2))
+                y = 2
+
+            case 1:
+                x = Int.random(in: 2..<(width - 2))
+                y = height - 3
+
+            case 2:
+                x = 2
+                y = Int.random(in: 2..<(height - 2))
+
+            default:
+                x = width - 3
+                y = Int.random(in: 2..<(height - 2))
+            }
+
+            let distanceFromNest = sqrt(
+                pow(
+                    Double(x - nestCenterX),
+                    2
+                )
+                +
+                pow(
+                    Double(y - nestCenterY),
+                    2
+                )
+            )
+
+            guard distanceFromNest > 18 else {
+                continue
+            }
+
+            let index = indexFor(x, y)
+
+            guard cells[index].terrain != .obstacle else {
+                continue
+            }
+
+            return (
+                Double(x),
+                Double(y)
+            )
+        }
+
+        return nil
+    }
+
+    // MARK: Occupancy
+
+    private func updateInvaderOccupancy() {
+
+        for index in defenseCells.indices {
+
+            defenseCells[index]
+                .occupiedByInvader = false
+        }
+
+        for invader in invaders {
+
+            let x = Int(invader.x.rounded())
+            let y = Int(invader.y.rounded())
+
+            guard
+                x >= 0,
+                x < width,
+                y >= 0,
+                y < height
+            else {
+                continue
+            }
+
+            defenseCells[
+                indexFor(x, y)
+            ].occupiedByInvader = true
+        }
+    }
+
+    // MARK: Threat Propagation
+
+    private func propagateThreat() {
+
+        for index in defenseCells.indices {
+
+            defenseCells[index].threat *= 0.82
+        }
+
+        for invader in invaders {
+
+            let radius = threatRadius(
+                for: invader.type
+            )
+
+            let centerX =
+                Int(invader.x.rounded())
+
+            let centerY =
+                Int(invader.y.rounded())
+
+            for dy in -radius...radius {
+
+                for dx in -radius...radius {
+
+                    let x = centerX + dx
+                    let y = centerY + dy
+
+                    guard
+                        x >= 0,
+                        x < width,
+                        y >= 0,
+                        y < height
+                    else {
+                        continue
+                    }
+
+                    let distance = sqrt(
+                        Double(
+                            dx * dx +
+                            dy * dy
+                        )
+                    )
+
+                    guard distance <=
+                            Double(radius)
+                    else {
+                        continue
+                    }
+
+                    let falloff =
+                        1.0 -
+                        distance /
+                        Double(radius + 1)
+
+                    let index =
+                        indexFor(x, y)
+
+                    defenseCells[index].threat =
+                        min(
+                            1.0,
+                            defenseCells[index].threat
+                            +
+                            invader.type.threat
+                            *
+                            falloff
+                            *
+                            0.18
+                        )
+                }
+            }
+        }
+    }
+
+    private func threatRadius(
+        for type: InvaderType
+    ) -> Int {
+
+        switch type {
+
+        case .rivalAnt:
+            return 5
+
+        case .cockroach:
+            return 6
+
+        case .mouse:
+            return 9
+
+        case .worm:
+            return 4
+
+        case .spider:
+            return 7
+        }
+    }
+
+    // MARK: Alarm Signal
+
+    private func updateDefensiveSignals() {
+
+        var totalAlarm = 0.0
+
+        for y in 0..<height {
+
+            for x in 0..<width {
+
+                let index =
+                    indexFor(x, y)
+
+                let localThreat =
+                    defenseCells[index].threat
+
+                var neighboringAlarm = 0.0
+
+                for dy in -1...1 {
+
+                    for dx in -1...1 {
+
+                        if dx == 0 &&
+                            dy == 0 {
+                            continue
+                        }
+
+                        let nx = x + dx
+                        let ny = y + dy
+
+                        guard
+                            nx >= 0,
+                            nx < width,
+                            ny >= 0,
+                            ny < height
+                        else {
+                            continue
+                        }
+
+                        neighboringAlarm +=
+                            defenseCells[
+                                indexFor(nx, ny)
+                            ].alarm
+                    }
+                }
+
+                let alarm = min(
+                    1.0,
+                    localThreat * 0.65
+                    +
+                    min(
+                        0.35,
+                        neighboringAlarm * 0.045
+                    )
+                )
+
+                defenseCells[index].alarm =
+                    alarm
+
+                totalAlarm += alarm
+            }
+        }
+
+        defensiveAlarm =
+            min(
+                1.0,
+                totalAlarm /
+                Double(
+                    max(
+                        1,
+                        cells.count
+                    )
+                )
+                * 8.0
+            )
+    }
+
+    // MARK: Defender Recruitment
+
+    private func recruitDefenders() {
+
+        defendersActive = 0
+
+        guard !ants.isEmpty else {
+            return
+        }
+
+        let recruitmentRatio =
+            min(
+                0.45,
+                0.08 +
+                defensiveAlarm * 0.42
+            )
+
+        for index in ants.indices {
+
+            let ant = ants[index]
+
+            let x =
+                Int(
+                    ant.x.rounded()
+                )
+
+            let y =
+                Int(
+                    ant.y.rounded()
+                )
+
+            guard
+                x >= 0,
+                x < width,
+                y >= 0,
+                y < height
+            else {
+                continue
+            }
+
+            let cell =
+                defenseCells[
+                    indexFor(x, y)
+                ]
+
+            if cell.alarm >
+                    defenseActivationThreshold &&
+                Double.random(in: 0...1)
+                    < recruitmentRatio {
+
+                defendersActive += 1
+
+                moveDefender(
+                    antIndex: index
+                )
+            }
+        }
+    }
+
+    private func moveDefender(
+        antIndex: Int
+    ) {
+
+        guard
+            let target =
+                nearestInvader(
+                    to: ants[antIndex]
+                )
+        else {
+            return
+        }
+
+        let dx =
+            target.x -
+            ants[antIndex].x
+
+        let dy =
+            target.y -
+            ants[antIndex].y
+
+        let distance = max(
+            0.001,
+            sqrt(
+                dx * dx +
+                dy * dy
+            )
+        )
+
+        let directionX =
+            dx / distance
+
+        let directionY =
+            dy / distance
+
+        let speed =
+            0.34 +
+            min(
+                0.22,
+                defensiveAlarm * 0.22
+            )
+
+        let newX =
+            ants[antIndex].x +
+            directionX * speed
+
+        let newY =
+            ants[antIndex].y +
+            directionY * speed
+
+        guard isDefenseWalkable(
+            x: newX,
+            y: newY
+        )
+        else {
+            return
+        }
+
+        ants[antIndex].x = newX
+        ants[antIndex].y = newY
+
+        ants[antIndex].directionX =
+            directionX
+
+        ants[antIndex].directionY =
+            directionY
+    }
+
+    private func nearestInvader(
+        to ant: Ant
+    ) -> ColonyInvader? {
+
+        invaders.min {
+            distanceSquared(
+                x1: ant.x,
+                y1: ant.y,
+                x2: $0.x,
+                y2: $0.y
+            )
+            <
+            distanceSquared(
+                x1: ant.x,
+                y1: ant.y,
+                x2: $1.x,
+                y2: $1.y
+            )
+        }
+    }
+
+    // MARK: Invader Movement
+
+    private func moveInvaders() {
+
+        for index in invaders.indices {
+
+            guard invaders[index].alive else {
+                continue
+            }
+
+            invaders[index].age += 1
+
+            let dx =
+                Double(nestCenterX) -
+                invaders[index].x
+
+            let dy =
+                Double(nestCenterY) -
+                invaders[index].y
+
+            let distance = max(
+                0.001,
+                sqrt(
+                    dx * dx +
+                    dy * dy
+                )
+            )
+
+            let directionX =
+                dx / distance
+
+            let directionY =
+                dy / distance
+
+            invaders[index].directionX =
+                directionX
+
+            invaders[index].directionY =
+                directionY
+
+            let speed =
+                invaders[index].type.speed
+
+            let newX =
+                invaders[index].x +
+                directionX * speed
+
+            let newY =
+                invaders[index].y +
+                directionY * speed
+
+            if isDefenseWalkable(
+                x: newX,
+                y: newY
+            ) {
+
+                invaders[index].x =
+                    newX
+
+                invaders[index].y =
+                    newY
+
+            } else {
+
+                // Turn when blocked.
+
+                invaders[index].directionX =
+                    -directionY
+
+                invaders[index].directionY =
+                    directionX
+            }
+        }
+    }
+
+    // MARK: Contact Resolution
+
+    private func resolveDefensiveContacts() {
+
+        guard !invaders.isEmpty else {
+            return
+        }
+
+        for invaderIndex in
+            invaders.indices {
+
+            guard
+                invaders[invaderIndex].alive
+            else {
+                continue
+            }
+
+            let invader =
+                invaders[invaderIndex]
+
+            var nearbyDefenders = 0
+
+            for ant in ants {
+
+                let distance =
+                    sqrt(
+                        pow(
+                            ant.x -
+                            invader.x,
+                            2
+                        )
+                        +
+                        pow(
+                            ant.y -
+                            invader.y,
+                            2
+                        )
+                    )
+
+                if distance < 2.4 {
+                    nearbyDefenders += 1
+                }
+            }
+
+            guard nearbyDefenders > 0 else {
+                continue
+            }
+
+            let localDefense =
+                min(
+                    1.0,
+                    Double(nearbyDefenders)
+                    / 8.0
+                )
+
+            let cellX =
+                Int(invader.x.rounded())
+
+            let cellY =
+                Int(invader.y.rounded())
+
+            var caDefense = 0.0
+
+            if cellX >= 0,
+               cellX < width,
+               cellY >= 0,
+               cellY < height {
+
+                caDefense =
+                    defenseCells[
+                        indexFor(
+                            cellX,
+                            cellY
+                        )
+                    ].defenseStrength
+            }
+
+            let damage =
+                (
+                    localDefense * 0.9
+                    +
+                    caDefense * 0.65
+                )
+                *
+                invader.type.threat
+
+            invaders[invaderIndex].health -=
+                damage
+
+            if invaders[invaderIndex].health <= 0 {
+
+                invadersDefeated += 1
+
+                reinforceDefenseAt(
+                    x: cellX,
+                    y: cellY,
+                    amount: 0.30
+                )
+            }
+        }
+    }
+
+    // MARK: Reinforcement CA
+
+    private func reinforceColony() {
+
+        for y in 0..<height {
+
+            for x in 0..<width {
+
+                let index =
+                    indexFor(x, y)
+
+                let alarm =
+                    defenseCells[index].alarm
+
+                let threat =
+                    defenseCells[index].threat
+
+                let localBuilt =
+                    isColonyCell(
+                        x: x,
+                        y: y
+                    )
+
+                if localBuilt {
+
+                    defenseCells[index]
+                        .defenseStrength =
+                        min(
+                            1.0,
+                            defenseCells[index]
+                                .defenseStrength
+                            +
+                            alarm * 0.08
+                        )
+                }
+
+                defenseCells[index]
+                    .defenderSignal =
+                    min(
+                        1.0,
+                        threat * 0.7
+                        +
+                        alarm * 0.3
+                    )
+
+                if alarm >
+                        defenseCriticalThreshold &&
+                    localBuilt {
+
+                    defenseCells[index]
+                        .blocked =
+                        min(
+                            1.0,
+                            defenseCells[index]
+                                .blocked
+                            +
+                            0.05
+                        )
+                }
+            }
+        }
+    }
+
+    private func reinforceDefenseAt(
+        x: Int,
+        y: Int,
+        amount: Double
+    ) {
+
+        guard
+            x >= 0,
+            x < width,
+            y >= 0,
+            y < height
+        else {
+            return
+        }
+
+        defenseCells[
+            indexFor(x, y)
+        ].defenseStrength =
+            min(
+                1.0,
+                defenseCells[
+                    indexFor(x, y)
+                ].defenseStrength
+                +
+                amount
+            )
+    }
+
+    // MARK: Field Dissipation
+
+    private func dissipateDefenseField() {
+
+        for index in defenseCells.indices {
+
+            defenseCells[index].alarm *=
+                0.93
+
+            defenseCells[index]
+                .defenderSignal *=
+                0.95
+
+            defenseCells[index]
+                .defenseStrength *=
+                0.998
+
+            defenseCells[index].blocked *=
+                0.996
+        }
+    }
+
+    // MARK: Invader Cleanup
+
+    private func removeDefeatedInvaders() {
+
+        let before = invaders.count
+
+        invaders.removeAll {
+            !$0.alive
+        }
+
+        let defeated =
+            before - invaders.count
+
+        if defeated > 0 {
+            defensiveAlarm =
+                max(
+                    0,
+                    defensiveAlarm -
+                    Double(defeated) * 0.04
+                )
+        }
+    }
+
+    // MARK: Breach Detection
+
+    private func calculateDefensiveAlarm() {
+
+        var breachCount = 0
+
+        for invader in invaders {
+
+            let distance =
+                sqrt(
+                    pow(
+                        invader.x -
+                        Double(nestCenterX),
+                        2
+                    )
+                    +
+                    pow(
+                        invader.y -
+                        Double(nestCenterY),
+                        2
+                    )
+                )
+
+            if distance < 8 {
+                breachCount += 1
+            }
+        }
+
+        invaderBreaches =
+            breachCount
+    }
+
+    // MARK: Helpers
+
+    private func isDefenseWalkable(
+        x: Double,
+        y: Double
+    ) -> Bool {
+
+        guard
+            x >= 1,
+            x < Double(width - 1),
+            y >= 1,
+            y < Double(height - 1)
+        else {
+            return false
+        }
+
+        let ix =
+            Int(x.rounded())
+
+        let iy =
+            Int(y.rounded())
+
+        guard
+            ix >= 0,
+            ix < width,
+            iy >= 0,
+            iy < height
+        else {
+            return false
+        }
+
+        let terrain =
+            cells[
+                indexFor(ix, iy)
+            ].terrain
+
+        return terrain != .obstacle
+    }
+
+    private func isColonyCell(
+        x: Int,
+        y: Int
+    ) -> Bool {
+
+        guard
+            x >= 0,
+            x < width,
+            y >= 0,
+            y < height
+        else {
+            return false
+        }
+
+        let terrain =
+            cells[
+                indexFor(x, y)
+            ].terrain
+
+        return terrain == .nest ||
+               terrain == .tunnel ||
+               terrain == .storage
+    }
+
+    private func distanceSquared(
+        x1: Double,
+        y1: Double,
+        x2: Double,
+        y2: Double
+    ) -> Double {
+
+        let dx = x1 - x2
+        let dy = y1 - y2
+
+        return dx * dx + dy * dy
+    }
+
+    // MARK: Manual Invader
+
+    func addInvader(
+        type: InvaderType
+    ) {
+
+        guard invaders.count <
+                maximumInvaders
+        else {
+            return
+        }
+
+        guard
+            let location =
+                randomInvaderEntry()
+        else {
+            return
+        }
+
+        invaders.append(
+            ColonyInvader(
+                type: type,
+                x: location.x,
+                y: location.y
+            )
+        )
+    }
+
+    // MARK: Statistics
+
+    var activeInvaderCount: Int {
+        invaders.count
+    }
+
+    var criticalDefenseCells: Int {
+
+        defenseCells.filter {
+            $0.alarm >
+            defenseCriticalThreshold
+        }.count
+    }
+
+    var averageDefenseStrength: Double {
+
+        guard !defenseCells.isEmpty else {
+            return 0
+        }
+
+        return defenseCells.reduce(0.0) {
+            $0 + $1.defenseStrength
+        }
+        /
+        Double(
+            defenseCells.count
+        )
+    }
+
+    var defenseStatus: String {
+
+        if invaders.isEmpty {
+            return "SECURE"
+        }
+
+        if defensiveAlarm >
+            defenseCriticalThreshold {
+
+            return "CRITICAL"
+        }
+
+        if defensiveAlarm >
+            defenseActivationThreshold {
+
+            return "DEFENDING"
+        }
+
+        return "ALERT"
     }
 }
 

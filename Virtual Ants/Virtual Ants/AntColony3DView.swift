@@ -8,20 +8,19 @@
 import Foundation
 import SwiftUI
 import SceneKit
+import UIKit
 
 // MARK: - 3D Scene View
 
 struct AntColony3DView: UIViewRepresentable {
 
     let simulation: AntColonySimulation
-
     let soilTransparency: Double
-
     let showGround: Bool
     let showFood: Bool
     let showAnts: Bool
     let showPheromones: Bool
-
+    let showInvaders: Bool = true
     let cameraResetToken: UUID
 
     func makeCoordinator() -> Coordinator {
@@ -34,47 +33,36 @@ struct AntColony3DView: UIViewRepresentable {
 
         let view = SCNView()
 
-        view.backgroundColor =
-            UIColor(
-                red: 0.025,
-                green: 0.030,
-                blue: 0.040,
-                alpha: 1
-            )
+        view.backgroundColor = UIColor(
+            red: 0.025,
+            green: 0.030,
+            blue: 0.040,
+            alpha: 1
+        )
 
-        // Camera remains freely movable.
         view.allowsCameraControl = true
-
-        // SceneKit renders independently from
-        // the SwiftUI simulation timer.
         view.rendersContinuously = true
-
         view.preferredFramesPerSecond = 60
-
-        view.antialiasingMode =
-            .multisampling4X
+        view.antialiasingMode = .multisampling4X
 
         let scene = SCNScene()
 
-        scene.background.contents =
-            UIColor(
-                red: 0.025,
-                green: 0.030,
-                blue: 0.040,
-                alpha: 1
-            )
+        scene.background.contents = UIColor(
+            red: 0.025,
+            green: 0.030,
+            blue: 0.040,
+            alpha: 1
+        )
 
-        // Fog belongs to SCNScene, not SCNView.
         scene.fogStartDistance = 45
         scene.fogEndDistance = 100
 
-        scene.fogColor =
-            UIColor(
-                red: 0.025,
-                green: 0.030,
-                blue: 0.040,
-                alpha: 1
-            )
+        scene.fogColor = UIColor(
+            red: 0.025,
+            green: 0.030,
+            blue: 0.040,
+            alpha: 1
+        )
 
         view.scene = scene
 
@@ -93,18 +81,13 @@ struct AntColony3DView: UIViewRepresentable {
 
         context.coordinator.update(
             simulation: simulation,
-            soilTransparency:
-                soilTransparency,
-            showGround:
-                showGround,
-            showFood:
-                showFood,
-            showAnts:
-                showAnts,
-            showPheromones:
-                showPheromones,
-            cameraResetToken:
-                cameraResetToken
+            soilTransparency: soilTransparency,
+            showGround: showGround,
+            showFood: showFood,
+            showAnts: showAnts,
+            showPheromones: showPheromones,
+            showInvaders: showInvaders,
+            cameraResetToken: cameraResetToken
         )
     }
 
@@ -114,10 +97,8 @@ struct AntColony3DView: UIViewRepresentable {
     ) {
 
         coordinator.stop()
-
         uiView.delegate = nil
     }
-
 
     // MARK: - Coordinator
 
@@ -146,33 +127,35 @@ struct AntColony3DView: UIViewRepresentable {
         private let antNode =
             SCNNode()
 
+        private let invaderNode =
+            SCNNode()
+
         private let pheromoneNode =
             SCNNode()
 
         private var cameraNode:
             SCNNode?
 
-        // Dynamic ant nodes.
+        // Dynamic ants.
         private var antNodes:
             [UUID: SCNNode] = [:]
 
-        // Dynamic food nodes.
+        // Dynamic food.
         private var foodNodes:
             [UUID: SCNNode] = [:]
 
-        // IMPORTANT:
-        // SceneKit positions are SCNVector3.
-        //
-        // This fixes the previous SIMD3<Float>
-        // versus SCNVector3 mismatch.
+        // Dynamic invaders.
+        private var invaderNodes:
+            [UUID: SCNNode] = [:]
+
         private var lastAntPositions:
             [UUID: SCNVector3] = [:]
 
-        // Structural cache.
+        private var lastInvaderPositions:
+            [UUID: SCNVector3] = [:]
+
         private var lastTunnelCount = -1
-
         private var lastStorageCount = -1
-
         private var lastObstacleCount = -1
 
         private var lastGroundVisibility =
@@ -183,6 +166,9 @@ struct AntColony3DView: UIViewRepresentable {
 
         private var lastPheromoneVisibility =
             false
+
+        private var lastInvaderVisibility =
+            true
 
         private var hasBuiltStaticScene =
             false
@@ -202,8 +188,7 @@ struct AntColony3DView: UIViewRepresentable {
         private let chamberHeight:
             CGFloat = 0.62
 
-
-        // MARK: Configure
+        // MARK: - Configure
 
         func configure(
             scene: SCNScene,
@@ -212,7 +197,6 @@ struct AntColony3DView: UIViewRepresentable {
 
             sceneView = view
 
-            // SceneKit continuously calls the delegate.
             view.delegate = self
 
             scene.rootNode.addChildNode(
@@ -236,6 +220,10 @@ struct AntColony3DView: UIViewRepresentable {
             )
 
             rootNode.addChildNode(
+                invaderNode
+            )
+
+            rootNode.addChildNode(
                 pheromoneNode
             )
 
@@ -249,99 +237,69 @@ struct AntColony3DView: UIViewRepresentable {
             )
         }
 
-
-        // MARK: Lighting
+        // MARK: - Lighting
 
         private func configureLighting(
             scene: SCNScene
         ) {
 
-            let keyNode =
-                SCNNode()
+            let keyNode = SCNNode()
 
-            let keyLight =
-                SCNLight()
-
+            let keyLight = SCNLight()
             keyLight.type = .omni
+            keyLight.intensity = 1200
+            keyLight.color = UIColor.white
 
-            keyLight.intensity =
-                1200
+            keyNode.light = keyLight
 
-            keyLight.color =
-                UIColor.white
-
-            keyNode.light =
-                keyLight
-
-            keyNode.position =
-                SCNVector3(
-                    0,
-                    18,
-                    5
-                )
+            keyNode.position = SCNVector3(
+                0,
+                18,
+                5
+            )
 
             rootNode.addChildNode(
                 keyNode
             )
 
-            let fillNode =
-                SCNNode()
+            let fillNode = SCNNode()
 
-            let fillLight =
-                SCNLight()
+            let fillLight = SCNLight()
+            fillLight.type = .ambient
+            fillLight.intensity = 500
+            fillLight.color = UIColor(
+                white: 0.75,
+                alpha: 1
+            )
 
-            fillLight.type =
-                .ambient
-
-            fillLight.intensity =
-                500
-
-            fillLight.color =
-                UIColor(
-                    white: 0.75,
-                    alpha: 1
-                )
-
-            fillNode.light =
-                fillLight
+            fillNode.light = fillLight
 
             rootNode.addChildNode(
                 fillNode
             )
         }
 
-
-        // MARK: Camera
+        // MARK: - Camera
 
         private func configureCamera(
             scene: SCNScene,
             view: SCNView
         ) {
 
-            let camera =
-                SCNNode()
+            let camera = SCNNode()
 
-            let cameraComponent =
-                SCNCamera()
+            let cameraComponent = SCNCamera()
+            cameraComponent.fieldOfView = 52
+            cameraComponent.zNear = 0.1
+            cameraComponent.zFar = 250
 
-            cameraComponent.fieldOfView =
-                52
+            camera.camera = cameraComponent
 
-            cameraComponent.zNear =
-                0.1
-
-            cameraComponent.zFar =
-                250
-
-            camera.camera =
-                cameraComponent
-
-            camera.position =
-                SCNVector3(
-                    0,
-                    18,
-                    25
-                )
+            camera.position = SCNVector3(
+                0,
+                18,
+                25
+            )
 
             camera.look(
                 at: SCNVector3(
@@ -355,21 +313,15 @@ struct AntColony3DView: UIViewRepresentable {
                 camera
             )
 
-            cameraNode =
-                camera
+            cameraNode = camera
 
-            view.pointOfView =
-                camera
+            view.pointOfView = camera
 
-            view.allowsCameraControl =
-                true
-
-            view.defaultCameraController
-                .inertiaEnabled = true
+            view.allowsCameraControl = true
+            view.defaultCameraController.inertiaEnabled = true
         }
 
-
-        // MARK: Update
+        // MARK: - Update
 
         func update(
             simulation:
@@ -384,17 +336,15 @@ struct AntColony3DView: UIViewRepresentable {
                 Bool,
             showPheromones:
                 Bool,
+            showInvaders:
+                Bool,
             cameraResetToken:
                 UUID
         ) {
 
-            self.simulation =
-                simulation
+            self.simulation = simulation
 
-            // Camera only resets when the user
-            // actually requests a reset.
-            if lastCameraResetToken
-                != cameraResetToken {
+            if lastCameraResetToken != cameraResetToken {
 
                 resetCamera()
 
@@ -410,36 +360,26 @@ struct AntColony3DView: UIViewRepresentable {
 
             let obstacleCount =
                 countObstacles(
-                    simulation:
-                        simulation
+                    simulation: simulation
                 )
 
             let structureChanged =
                 !hasBuiltStaticScene
-                || tunnelCount
-                    != lastTunnelCount
-                || storageCount
-                    != lastStorageCount
-                || obstacleCount
-                    != lastObstacleCount
-                || showGround
-                    != lastGroundVisibility
+                || tunnelCount != lastTunnelCount
+                || storageCount != lastStorageCount
+                || obstacleCount != lastObstacleCount
+                || showGround != lastGroundVisibility
                 || abs(
                     soilTransparency
                     - lastSoilTransparency
                 ) > 0.001
 
-            // Static geometry is rebuilt only when
-            // the colony structure changes.
             if structureChanged {
 
                 rebuildStaticScene(
-                    simulation:
-                        simulation,
-                    soilTransparency:
-                        soilTransparency,
-                    showGround:
-                        showGround
+                    simulation: simulation,
+                    soilTransparency: soilTransparency,
+                    showGround: showGround
                 )
 
                 lastTunnelCount =
@@ -461,31 +401,50 @@ struct AntColony3DView: UIViewRepresentable {
                     true
             }
 
-            if showPheromones
-                != lastPheromoneVisibility {
+            if showPheromones !=
+                lastPheromoneVisibility {
 
                 rebuildPheromoneNodes(
-                    simulation:
-                        simulation,
-                    enabled:
-                        showPheromones
+                    simulation: simulation,
+                    enabled: showPheromones
                 )
 
                 lastPheromoneVisibility =
                     showPheromones
             }
 
-            // Initial dynamic synchronization.
+            if showInvaders !=
+                lastInvaderVisibility {
+
+                if !showInvaders {
+
+                    invaderNode.childNodes
+                        .forEach {
+                            $0.isHidden = true
+                        }
+
+                } else {
+
+                    invaderNode.childNodes
+                        .forEach {
+                            $0.isHidden = false
+                        }
+                }
+
+                lastInvaderVisibility =
+                    showInvaders
+            }
+
             updateDynamicState(
-                simulation:
-                    simulation,
-                animate:
-                    false
+                simulation: simulation,
+                showAnts: showAnts,
+                showFood: showFood,
+                showInvaders: showInvaders,
+                animate: false
             )
         }
 
-
-        // MARK: Continuous Rendering
+        // MARK: - Continuous Rendering
 
         func renderer(
             _ renderer:
@@ -499,52 +458,80 @@ struct AntColony3DView: UIViewRepresentable {
                 return
             }
 
-            // This is the critical performance fix.
-            //
-            // SceneKit updates dynamic objects at
-            // rendering frequency without forcing
-            // SwiftUI to rebuild the scene.
             updateDynamicState(
-                simulation:
-                    simulation,
-                animate:
-                    true
+                simulation: simulation,
+                showAnts: true,
+                showFood: true,
+                showInvaders: lastInvaderVisibility,
+                animate: true
             )
         }
 
-
-        // MARK: Dynamic State
+        // MARK: - Dynamic State
 
         private func updateDynamicState(
             simulation:
                 AntColonySimulation,
+            showAnts:
+                Bool,
+            showFood:
+                Bool,
+            showInvaders:
+                Bool,
             animate:
                 Bool
         ) {
 
-            updateAntNodes(
-                simulation:
-                    simulation,
-                animate:
-                    animate
-            )
+            if showAnts {
 
-            updateFoodNodes(
-                simulation:
-                    simulation
-            )
+                antNode.isHidden = false
+
+                updateAntNodes(
+                    simulation: simulation,
+                    animate: animate
+                )
+
+            } else {
+
+                antNode.isHidden = true
+            }
+
+            if showFood {
+
+                foodNode.isHidden = false
+
+                updateFoodNodes(
+                    simulation: simulation
+                )
+
+            } else {
+
+                foodNode.isHidden = true
+            }
+
+            if showInvaders {
+
+                invaderNode.isHidden = false
+
+                updateInvaderNodes(
+                    simulation: simulation,
+                    animate: animate
+                )
+
+            } else {
+
+                invaderNode.isHidden = true
+            }
 
             if lastPheromoneVisibility {
 
                 updatePheromoneValues(
-                    simulation:
-                        simulation
+                    simulation: simulation
                 )
             }
         }
 
-
-        // MARK: Ant Nodes
+        // MARK: - Ant Nodes
 
         private func updateAntNodes(
             simulation:
@@ -566,21 +553,18 @@ struct AntColony3DView: UIViewRepresentable {
                     ant.id
                 )
 
-                let node:
-                    SCNNode
+                let node: SCNNode
 
                 if let existing =
                     antNodes[ant.id] {
 
-                    node =
-                        existing
+                    node = existing
 
                 } else {
 
                     node =
                         createAntNode(
-                            ant:
-                                ant
+                            ant: ant
                         )
 
                     antNodes[ant.id] =
@@ -593,16 +577,12 @@ struct AntColony3DView: UIViewRepresentable {
 
                 updateAntNode(
                     node,
-                    ant:
-                        ant,
-                    simulation:
-                        simulation,
-                    animate:
-                        animate
+                    ant: ant,
+                    simulation: simulation,
+                    animate: animate
                 )
             }
 
-            // Remove ants that died.
             let deadIDs =
                 antNodes.keys.filter {
                     !livingIDs.contains($0)
@@ -614,69 +594,55 @@ struct AntColony3DView: UIViewRepresentable {
                     .removeFromParentNode()
 
                 antNodes.removeValue(
-                    forKey:
-                        id
+                    forKey: id
                 )
 
                 lastAntPositions
                     .removeValue(
-                        forKey:
-                            id
+                        forKey: id
                     )
             }
         }
-
 
         private func createAntNode(
             ant: Ant
         ) -> SCNNode {
 
-            let container =
-                SCNNode()
+            let container = SCNNode()
 
             container.name =
                 "ant-\(ant.id.uuidString)"
 
-            // Body.
             let bodyGeometry =
                 SCNSphere(
-                    radius:
-                        0.115
+                    radius: 0.115
                 )
 
-            bodyGeometry.segmentCount =
-                8
-
+            bodyGeometry.segmentCount = 8
             bodyGeometry.firstMaterial =
                 antMaterial()
 
             let body =
                 SCNNode(
-                    geometry:
-                        bodyGeometry
+                    geometry: bodyGeometry
                 )
 
             container.addChildNode(
                 body
             )
 
-            // Head.
             let headGeometry =
                 SCNSphere(
-                    radius:
-                        0.075
+                    radius: 0.075
                 )
 
-            headGeometry.segmentCount =
-                7
-
+            headGeometry.segmentCount = 7
             headGeometry.firstMaterial =
                 antMaterial()
 
             let head =
                 SCNNode(
-                    geometry:
-                        headGeometry
+                    geometry: headGeometry
                 )
 
             head.position =
@@ -690,23 +656,18 @@ struct AntColony3DView: UIViewRepresentable {
                 head
             )
 
-            // State indicator.
             let stateGeometry =
                 SCNSphere(
-                    radius:
-                        0.045
+                    radius: 0.045
                 )
 
-            stateGeometry.segmentCount =
-                6
-
+            stateGeometry.segmentCount = 6
             stateGeometry.firstMaterial =
                 stateMaterial()
 
             let stateLight =
                 SCNNode(
-                    geometry:
-                        stateGeometry
+                    geometry: stateGeometry
                 )
 
             stateLight.name =
@@ -726,7 +687,6 @@ struct AntColony3DView: UIViewRepresentable {
             return container
         }
 
-
         private func updateAntNode(
             _ node: SCNNode,
             ant: Ant,
@@ -738,42 +698,30 @@ struct AntColony3DView: UIViewRepresentable {
 
             let target =
                 worldPosition(
-                    x:
-                        ant.x,
-                    y:
-                        ant.y,
-                    depth:
-                        antDepth(
-                            for:
-                                ant
-                        ),
-                    simulation:
-                        simulation
+                    x: ant.x,
+                    y: ant.y,
+                    depth: antDepth(for: ant),
+                    simulation: simulation
                 )
 
             let previous =
-                lastAntPositions[
-                    ant.id
-                ]
+                lastAntPositions[ant.id]
 
             if animate,
                let previous,
                distanceSquared(
-                   previous,
-                   target
+                    previous,
+                    target
                ) > 0.000001 {
 
                 SCNTransaction.begin()
 
-                SCNTransaction
-                    .animationDuration =
+                SCNTransaction.animationDuration =
                     0.065
 
-                SCNTransaction
-                    .animationTimingFunction =
+                SCNTransaction.animationTimingFunction =
                     CAMediaTimingFunction(
-                        name:
-                            .easeInEaseOut
+                        name: .easeInEaseOut
                     )
 
                 node.position =
@@ -787,19 +735,14 @@ struct AntColony3DView: UIViewRepresentable {
                     target
             }
 
-            lastAntPositions[
-                ant.id
-            ] = target
+            lastAntPositions[ant.id] =
+                target
 
             let directionX =
-                Float(
-                    ant.directionX
-                )
+                Float(ant.directionX)
 
             let directionY =
-                Float(
-                    ant.directionY
-                )
+                Float(ant.directionY)
 
             if abs(directionX) > 0.001
                 || abs(directionY) > 0.001 {
@@ -815,13 +758,10 @@ struct AntColony3DView: UIViewRepresentable {
             }
 
             updateAntAppearance(
-                node:
-                    node,
-                ant:
-                    ant
+                node: node,
+                ant: ant
             )
         }
-
 
         private func antDepth(
             for ant: Ant
@@ -848,7 +788,6 @@ struct AntColony3DView: UIViewRepresentable {
                 return -0.70
             }
         }
-
 
         private func updateAntAppearance(
             node: SCNNode,
@@ -922,24 +861,1104 @@ struct AntColony3DView: UIViewRepresentable {
 
             if let stateLight =
                 node.childNode(
-                    withName:
-                        "stateLight",
-                    recursively:
-                        false
+                    withName: "stateLight",
+                    recursively: false
                 ) {
 
                 stateLight.geometry?
                     .firstMaterial?
                     .emission.contents =
                     stateEmission(
-                        state:
-                            ant.state
+                        state: ant.state
                     )
             }
         }
 
+        // MARK: - Invaders
 
-        // MARK: Food Nodes
+        private func updateInvaderNodes(
+            simulation:
+                AntColonySimulation,
+            animate:
+                Bool
+        ) {
+
+            var livingIDs =
+                Set<UUID>()
+
+            livingIDs.reserveCapacity(
+                simulation.invaders.count
+            )
+
+            for invader in simulation.invaders {
+
+                guard invader.alive,
+                      invader.health > 0
+                else {
+                    continue
+                }
+
+                livingIDs.insert(
+                    invader.id
+                )
+
+                let node: SCNNode
+
+                if let existing =
+                    invaderNodes[invader.id] {
+
+                    node = existing
+
+                } else {
+
+                    node =
+                        createInvaderNode(
+                            invader: invader
+                        )
+
+                    invaderNodes[
+                        invader.id
+                    ] = node
+
+                    invaderNode.addChildNode(
+                        node
+                    )
+                }
+
+                updateInvaderNode(
+                    node,
+                    invader: invader,
+                    simulation: simulation,
+                    animate: animate
+                )
+            }
+
+            let staleIDs =
+                invaderNodes.keys.filter {
+                    !livingIDs.contains($0)
+                }
+
+            for id in staleIDs {
+
+                invaderNodes[id]?
+                    .removeFromParentNode()
+
+                invaderNodes.removeValue(
+                    forKey: id
+                )
+
+                lastInvaderPositions
+                    .removeValue(
+                        forKey: id
+                    )
+            }
+        }
+
+        private func createInvaderNode(
+            invader:
+                ColonyInvader
+        ) -> SCNNode {
+
+            switch invader.type {
+
+            case .rivalAnt:
+
+                return createRivalAntNode(
+                    invader: invader
+                )
+
+            case .cockroach:
+
+                return createCockroachNode(
+                    invader: invader
+                )
+
+            case .mouse:
+
+                return createMouseNode(
+                    invader: invader
+                )
+
+            case .worm:
+
+                return createWormNode(
+                    invader: invader
+                )
+
+            case .spider:
+
+                return createSpiderNode(
+                    invader: invader
+                )
+            }
+        }
+
+        private func updateInvaderNode(
+            _ node: SCNNode,
+            invader:
+                ColonyInvader,
+            simulation:
+                AntColonySimulation,
+            animate:
+                Bool
+        ) {
+
+            let target =
+                worldPosition(
+                    x: invader.x,
+                    y: invader.y,
+                    depth: invaderDepth(
+                        type: invader.type
+                    ),
+                    simulation: simulation
+                )
+
+            let previous =
+                lastInvaderPositions[
+                    invader.id
+                ]
+
+            if animate,
+               let previous,
+               distanceSquared(
+                    previous,
+                    target
+               ) > 0.000001 {
+
+                SCNTransaction.begin()
+
+                SCNTransaction.animationDuration =
+                    0.085
+
+                SCNTransaction.animationTimingFunction =
+                    CAMediaTimingFunction(
+                        name: .easeInEaseOut
+                    )
+
+                node.position =
+                    target
+
+                SCNTransaction.commit()
+
+            } else {
+
+                node.position =
+                    target
+            }
+
+            lastInvaderPositions[
+                invader.id
+            ] = target
+
+            let dx =
+                Float(invader.directionX)
+
+            let dy =
+                Float(invader.directionY)
+
+            if abs(dx) > 0.001
+                || abs(dy) > 0.001 {
+
+                let angle =
+                    atan2(
+                        dy,
+                        dx
+                    )
+
+                node.eulerAngles.y =
+                    -Float(angle)
+            }
+
+            let health =
+                max(
+                    0,
+                    min(
+                        1,
+                        invader.health
+                    )
+                )
+
+            node.opacity =
+                CGFloat(
+                    0.35
+                    + 0.65 * health
+                )
+
+            node.scale =
+                SCNVector3(
+                    0.75 + Float(health) * 0.25,
+                    0.75 + Float(health) * 0.25,
+                    0.75 + Float(health) * 0.25
+                )
+
+            updateInvaderHealthIndicator(
+                node: node,
+                health: health
+            )
+        }
+
+        private func invaderDepth(
+            type:
+                InvaderType
+        ) -> CGFloat {
+
+            switch type {
+
+            case .rivalAnt:
+                return -0.60
+
+            case .cockroach:
+                return -0.57
+
+            case .mouse:
+                return -0.48
+
+            case .worm:
+                return -0.54
+
+            case .spider:
+                return -0.56
+            }
+        }
+
+        // MARK: - Rival Ant
+
+        private func createRivalAntNode(
+            invader:
+                ColonyInvader
+        ) -> SCNNode {
+
+            let container = SCNNode()
+
+            container.name =
+                "invader-rival-ant-\(invader.id.uuidString)"
+
+            let abdomen =
+                SCNSphere(radius: 0.15)
+
+            abdomen.segmentCount = 8
+            abdomen.firstMaterial =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        red: 0.55,
+                        green: 0.10,
+                        blue: 0.08,
+                        alpha: 1
+                    )
+                )
+
+            let abdomenNode =
+                SCNNode(
+                    geometry: abdomen
+                )
+
+            abdomenNode.scale =
+                SCNVector3(
+                    1.15,
+                    0.80,
+                    0.90
+                )
+
+            container.addChildNode(
+                abdomenNode
+            )
+
+            let thorax =
+                SCNSphere(radius: 0.11)
+
+            thorax.segmentCount = 8
+            thorax.firstMaterial =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        red: 0.40,
+                        green: 0.07,
+                        blue: 0.05,
+                        alpha: 1
+                    )
+                )
+
+            let thoraxNode =
+                SCNNode(
+                    geometry: thorax
+                )
+
+            thoraxNode.position =
+                SCNVector3(
+                    0.12,
+                    0,
+                    0
+                )
+
+            container.addChildNode(
+                thoraxNode
+            )
+
+            let head =
+                SCNSphere(radius: 0.075)
+
+            head.segmentCount = 7
+            head.firstMaterial =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        red: 0.30,
+                        green: 0.04,
+                        blue: 0.03,
+                        alpha: 1
+                    )
+                )
+
+            let headNode =
+                SCNNode(
+                    geometry: head
+                )
+
+            headNode.position =
+                SCNVector3(
+                    0.24,
+                    0.01,
+                    0
+                )
+
+            container.addChildNode(
+                headNode
+            )
+
+            addInvaderLegs(
+                to: container,
+                count: 6,
+                length: 0.16,
+                thickness: 0.018
+            )
+
+            return container
+        }
+
+        // MARK: - Cockroach
+
+        private func createCockroachNode(
+            invader:
+                ColonyInvader
+        ) -> SCNNode {
+
+            let container = SCNNode()
+
+            container.name =
+                "invader-cockroach-\(invader.id.uuidString)"
+
+            let body =
+                SCNSphere(radius: 0.20)
+
+            body.segmentCount = 10
+
+            body.firstMaterial =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        red: 0.18,
+                        green: 0.08,
+                        blue: 0.035,
+                        alpha: 1
+                    )
+                )
+
+            let bodyNode =
+                SCNNode(
+                    geometry: body
+                )
+
+            bodyNode.scale =
+                SCNVector3(
+                    1.55,
+                    0.45,
+                    0.80
+                )
+
+            container.addChildNode(
+                bodyNode
+            )
+
+            let head =
+                SCNSphere(radius: 0.09)
+
+            head.segmentCount = 7
+            head.firstMaterial =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        red: 0.12,
+                        green: 0.045,
+                        blue: 0.02,
+                        alpha: 1
+                    )
+                )
+
+            let headNode =
+                SCNNode(
+                    geometry: head
+                )
+
+            headNode.position =
+                SCNVector3(
+                    0.28,
+                    0,
+                    0
+                )
+
+            container.addChildNode(
+                headNode
+            )
+
+            addAntennae(
+                to: container,
+                length: 0.30
+            )
+
+            addInvaderLegs(
+                to: container,
+                count: 6,
+                length: 0.28,
+                thickness: 0.018
+            )
+
+            return container
+        }
+
+        // MARK: - Mouse
+
+        private func createMouseNode(
+            invader:
+                ColonyInvader
+        ) -> SCNNode {
+
+            let container = SCNNode()
+
+            container.name =
+                "invader-mouse-\(invader.id.uuidString)"
+
+            let body =
+                SCNSphere(radius: 0.26)
+
+            body.segmentCount = 10
+
+            body.firstMaterial =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        white: 0.42,
+                        alpha: 1
+                    )
+                )
+
+            let bodyNode =
+                SCNNode(
+                    geometry: body
+                )
+
+            bodyNode.scale =
+                SCNVector3(
+                    1.35,
+                    0.85,
+                    0.85
+                )
+
+            container.addChildNode(
+                bodyNode
+            )
+
+            let head =
+                SCNSphere(radius: 0.17)
+
+            head.segmentCount = 9
+
+            head.firstMaterial =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        white: 0.48,
+                        alpha: 1
+                    )
+                )
+
+            let headNode =
+                SCNNode(
+                    geometry: head
+                )
+
+            headNode.position =
+                SCNVector3(
+                    0.30,
+                    0.02,
+                    0
+                )
+
+            container.addChildNode(
+                headNode
+            )
+
+            let earGeometry =
+                SCNCylinder(
+                    radius: 0.075,
+                    height: 0.035
+                )
+
+            earGeometry.radialSegmentCount = 8
+            earGeometry.firstMaterial =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        red: 0.65,
+                        green: 0.35,
+                        blue: 0.35,
+                        alpha: 1
+                    )
+                )
+
+            let leftEar =
+                SCNNode(
+                    geometry: earGeometry
+                )
+
+            leftEar.position =
+                SCNVector3(
+                    0.23,
+                    0.16,
+                    0.10
+                )
+
+            leftEar.eulerAngles.z =
+                Float.pi / 2
+
+            container.addChildNode(
+                leftEar
+            )
+
+            let rightEar =
+                leftEar.clone()
+
+            rightEar.position.z =
+                -0.10
+
+            container.addChildNode(
+                rightEar
+            )
+
+            let eyeGeometry =
+                SCNSphere(
+                    radius: 0.025
+                )
+
+            eyeGeometry.segmentCount = 6
+
+            let eyeMaterial =
+                SCNMaterial()
+
+            eyeMaterial.diffuse.contents =
+                UIColor.black
+
+            eyeMaterial.emission.contents =
+                UIColor.white
+
+            eyeMaterial.emission.intensity =
+                0.15
+
+            eyeGeometry.firstMaterial =
+                eyeMaterial
+
+            let eye =
+                SCNNode(
+                    geometry: eyeGeometry
+                )
+
+            eye.position =
+                SCNVector3(
+                    0.43,
+                    0.08,
+                    0.08
+                )
+
+            container.addChildNode(
+                eye
+            )
+
+            let secondEye =
+                eye.clone()
+
+            secondEye.position.z =
+                -0.08
+
+            container.addChildNode(
+                secondEye
+            )
+
+            addMouseTail(
+                to: container
+            )
+
+            return container
+        }
+
+        private func addMouseTail(
+            to container: SCNNode
+        ) {
+
+            let material =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        red: 0.55,
+                        green: 0.32,
+                        blue: 0.30,
+                        alpha: 1
+                    )
+                )
+
+            var previous =
+                SCNVector3(
+                    -0.25,
+                    0,
+                    0
+                )
+
+            for index in 0..<5 {
+
+                let geometry =
+                    SCNSphere(
+                        radius:
+                            0.035
+                    )
+
+                geometry.segmentCount = 6
+                geometry.firstMaterial =
+                    material
+
+                let node =
+                    SCNNode(
+                        geometry: geometry
+                    )
+
+                let offset =
+                    Float(index + 1)
+
+                node.position =
+                    SCNVector3(
+                        -0.25 - offset * 0.10,
+                        -0.01 * offset,
+                        sin(offset) * 0.025
+                    )
+
+                container.addChildNode(
+                    node
+                )
+
+                previous =
+                    node.position
+            }
+
+            _ = previous
+        }
+
+        // MARK: - Worm
+
+        private func createWormNode(
+            invader:
+                ColonyInvader
+        ) -> SCNNode {
+
+            let container = SCNNode()
+
+            container.name =
+                "invader-worm-\(invader.id.uuidString)"
+
+            let material =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        red: 0.50,
+                        green: 0.24,
+                        blue: 0.16,
+                        alpha: 1
+                    )
+                )
+
+            for index in 0..<9 {
+
+                let radius =
+                    0.075
+                    - CGFloat(index) * 0.003
+
+                let geometry =
+                    SCNSphere(
+                        radius:
+                            max(
+                                0.045,
+                                radius
+                            )
+                    )
+
+                geometry.segmentCount = 7
+                geometry.firstMaterial =
+                    material
+
+                let segment =
+                    SCNNode(
+                        geometry: geometry
+                    )
+
+                let x =
+                    Float(
+                        -0.28
+                        + Double(index) * 0.075
+                    )
+
+                let wave =
+                    Float(
+                        sin(
+                            Double(index) * 0.85
+                        )
+                    ) * 0.035
+
+                segment.position =
+                    SCNVector3(
+                        x,
+                        wave,
+                        0
+                    )
+
+                container.addChildNode(
+                    segment
+                )
+            }
+
+            return container
+        }
+
+        // MARK: - Spider
+
+        private func createSpiderNode(
+            invader:
+                ColonyInvader
+        ) -> SCNNode {
+
+            let container = SCNNode()
+
+            container.name =
+                "invader-spider-\(invader.id.uuidString)"
+
+            let abdomen =
+                SCNSphere(radius: 0.15)
+
+            abdomen.segmentCount = 9
+
+            abdomen.firstMaterial =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        red: 0.08,
+                        green: 0.08,
+                        blue: 0.10,
+                        alpha: 1
+                    )
+                )
+
+            let abdomenNode =
+                SCNNode(
+                    geometry: abdomen
+                )
+
+            abdomenNode.scale =
+                SCNVector3(
+                    1.20,
+                    0.80,
+                    1.0
+                )
+
+            abdomenNode.position =
+                SCNVector3(
+                    -0.08,
+                    0.01,
+                    0
+                )
+
+            container.addChildNode(
+                abdomenNode
+            )
+
+            let cephalothorax =
+                SCNSphere(radius: 0.105)
+
+            cephalothorax.segmentCount = 8
+
+            cephalothorax.firstMaterial =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        red: 0.13,
+                        green: 0.13,
+                        blue: 0.15,
+                        alpha: 1
+                    )
+                )
+
+            let thoraxNode =
+                SCNNode(
+                    geometry:
+                        cephalothorax
+                )
+
+            thoraxNode.position =
+                SCNVector3(
+                    0.12,
+                    0.01,
+                    0
+                )
+
+            container.addChildNode(
+                thoraxNode
+            )
+
+            addSpiderLegs(
+                to: container
+            )
+
+            return container
+        }
+
+        private func addSpiderLegs(
+            to container: SCNNode
+        ) {
+
+            let material =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        red: 0.12,
+                        green: 0.12,
+                        blue: 0.14,
+                        alpha: 1
+                    )
+                )
+
+            let angles: [Float] = [
+                0.45,
+                0.75,
+                1.05,
+                1.35,
+                -0.45,
+                -0.75,
+                -1.05,
+                -1.35
+            ]
+
+            for angle in angles {
+
+                let upper =
+                    SCNCylinder(
+                        radius: 0.014,
+                        height: 0.20
+                    )
+
+                upper.radialSegmentCount = 5
+                upper.firstMaterial =
+                    material
+
+                let upperNode =
+                    SCNNode(
+                        geometry: upper
+                    )
+
+                upperNode.position =
+                    SCNVector3(
+                        0,
+                        -0.02,
+                        0
+                    )
+
+                upperNode.eulerAngles.z =
+                    angle
+
+                container.addChildNode(
+                    upperNode
+                )
+
+                let lower =
+                    SCNCylinder(
+                        radius: 0.011,
+                        height: 0.20
+                    )
+
+                lower.radialSegmentCount = 5
+                lower.firstMaterial =
+                    material
+
+                let lowerNode =
+                    SCNNode(
+                        geometry: lower
+                    )
+
+                lowerNode.position =
+                    SCNVector3(
+                        0,
+                        -0.13,
+                        0.10
+                    )
+
+                lowerNode.eulerAngles.z =
+                    angle * 0.65
+
+                container.addChildNode(
+                    lowerNode
+                )
+            }
+        }
+
+        // MARK: - Invader Details
+
+        private func addInvaderLegs(
+            to container: SCNNode,
+            count: Int,
+            length: CGFloat,
+            thickness: CGFloat
+        ) {
+
+            let material =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        white: 0.12,
+                        alpha: 1
+                    )
+                )
+
+            let sideCount =
+                max(
+                    1,
+                    count / 2
+                )
+
+            for index in 0..<sideCount {
+
+                let offset =
+                    Float(
+                        index
+                    )
+                    - Float(
+                        sideCount - 1
+                    ) / 2
+
+                for side in [-1.0, 1.0] {
+
+                    let geometry =
+                        SCNCylinder(
+                            radius: thickness,
+                            height: length
+                        )
+
+                    geometry.radialSegmentCount = 5
+                    geometry.firstMaterial =
+                        material
+
+                    let node =
+                        SCNNode(
+                            geometry: geometry
+                        )
+
+                    node.position =
+                        SCNVector3(
+                            Float(offset) * 0.10,
+                            -0.04,
+                            Float(side) * 0.12
+                        )
+
+                    node.eulerAngles.x =
+                        Float(side) * 0.85
+
+                    container.addChildNode(
+                        node
+                    )
+                }
+            }
+        }
+
+        private func addAntennae(
+            to container: SCNNode,
+            length: CGFloat
+        ) {
+
+            let material =
+                invaderMaterial(
+                    diffuse: UIColor(
+                        white: 0.10,
+                        alpha: 1
+                    )
+                )
+
+            for side in [-1.0, 1.0] {
+
+                let geometry =
+                    SCNCylinder(
+                        radius: 0.008,
+                        height: length
+                    )
+
+                geometry.radialSegmentCount = 5
+                geometry.firstMaterial =
+                    material
+
+                let antenna =
+                    SCNNode(
+                        geometry: geometry
+                    )
+
+                antenna.position =
+                    SCNVector3(
+                        0.33,
+                        0.07,
+                        Float(side) * 0.055
+                    )
+
+                antenna.eulerAngles.z =
+                    Float.pi / 2.7
+
+                antenna.eulerAngles.x =
+                    Float(side) * 0.20
+
+                container.addChildNode(
+                    antenna
+                )
+            }
+        }
+
+        private func updateInvaderHealthIndicator(
+            node: SCNNode,
+            health: Double
+        ) {
+
+            if let indicator =
+                node.childNode(
+                    withName:
+                        "invaderHealth",
+                    recursively: true
+                ) {
+
+                indicator.geometry?
+                    .firstMaterial?
+                    .emission.intensity =
+                    CGFloat(
+                        0.20
+                        + health * 0.80
+                    )
+            }
+        }
+
+        private func invaderMaterial(
+            diffuse: UIColor
+        ) -> SCNMaterial {
+
+            let material =
+                SCNMaterial()
+
+            material.diffuse.contents =
+                diffuse
+
+            material.specular.contents =
+                UIColor.white
+
+            material.shininess =
+                18
+
+            return material
+        }
+
+        // MARK: - Food Nodes
 
         private func updateFoodNodes(
             simulation:
@@ -963,28 +1982,22 @@ struct AntColony3DView: UIViewRepresentable {
                     source.id
                 )
 
-                let node:
-                    SCNNode
+                let node: SCNNode
 
                 if let existing =
-                    foodNodes[
-                        source.id
-                    ] {
+                    foodNodes[source.id] {
 
-                    node =
-                        existing
+                    node = existing
 
                 } else {
 
                     node =
                         createFoodNode(
-                            source:
-                                source
+                            source: source
                         )
 
-                    foodNodes[
-                        source.id
-                    ] = node
+                    foodNodes[source.id] =
+                        node
 
                     foodNode.addChildNode(
                         node
@@ -993,14 +2006,10 @@ struct AntColony3DView: UIViewRepresentable {
 
                 node.position =
                     worldPosition(
-                        x:
-                            source.x,
-                        y:
-                            source.y,
-                        depth:
-                            -0.42,
-                        simulation:
-                            simulation
+                        x: source.x,
+                        y: source.y,
+                        depth: -0.42,
+                        simulation: simulation
                     )
 
                 let scale =
@@ -1009,8 +2018,7 @@ struct AntColony3DView: UIViewRepresentable {
                         min(
                             1.8,
                             CGFloat(
-                                source.amount
-                                / 20.0
+                                source.amount / 20.0
                             )
                         )
                     )
@@ -1034,12 +2042,10 @@ struct AntColony3DView: UIViewRepresentable {
                     .removeFromParentNode()
 
                 foodNodes.removeValue(
-                    forKey:
-                        id
+                    forKey: id
                 )
             }
         }
-
 
         private func createFoodNode(
             source:
@@ -1048,20 +2054,17 @@ struct AntColony3DView: UIViewRepresentable {
 
             let geometry =
                 SCNSphere(
-                    radius:
-                        0.16
+                    radius: 0.16
                 )
 
-            geometry.segmentCount =
-                8
+            geometry.segmentCount = 8
 
             let material =
                 SCNMaterial()
 
             let color =
                 foodColor(
-                    type:
-                        source.type
+                    type: source.type
                 )
 
             material.diffuse.contents =
@@ -1078,8 +2081,7 @@ struct AntColony3DView: UIViewRepresentable {
 
             let node =
                 SCNNode(
-                    geometry:
-                        geometry
+                    geometry: geometry
                 )
 
             node.name =
@@ -1088,8 +2090,7 @@ struct AntColony3DView: UIViewRepresentable {
             return node
         }
 
-
-        // MARK: Static Scene
+        // MARK: - Static Scene
 
         private func rebuildStaticScene(
             simulation:
@@ -1113,19 +2114,16 @@ struct AntColony3DView: UIViewRepresentable {
             if showGround {
 
                 createCutawayGround(
-                    simulation:
-                        simulation,
+                    simulation: simulation,
                     transparency:
                         soilTransparency
                 )
             }
 
             createColonyStructure(
-                simulation:
-                    simulation
+                simulation: simulation
             )
         }
-
 
         private func createCutawayGround(
             simulation:
@@ -1135,27 +2133,19 @@ struct AntColony3DView: UIViewRepresentable {
         ) {
 
             let width =
-                CGFloat(
-                    simulation.width
-                )
+                CGFloat(simulation.width)
                 * cellSize
 
             let height =
-                CGFloat(
-                    simulation.height
-                )
+                CGFloat(simulation.height)
                 * cellSize
 
             let geometry =
                 SCNBox(
-                    width:
-                        width,
-                    height:
-                        groundThickness,
-                    length:
-                        height,
-                    chamferRadius:
-                        0
+                    width: width,
+                    height: groundThickness,
+                    length: height,
+                    chamferRadius: 0
                 )
 
             let material =
@@ -1173,9 +2163,7 @@ struct AntColony3DView: UIViewRepresentable {
                 )
 
             material.transparency =
-                CGFloat(
-                    transparency
-                )
+                CGFloat(transparency)
 
             material.blendMode =
                 .alpha
@@ -1183,7 +2171,6 @@ struct AntColony3DView: UIViewRepresentable {
             material.isDoubleSided =
                 true
 
-            // Important for transparent cutaway.
             material.writesToDepthBuffer =
                 false
 
@@ -1192,8 +2179,7 @@ struct AntColony3DView: UIViewRepresentable {
 
             let soil =
                 SCNNode(
-                    geometry:
-                        geometry
+                    geometry: geometry
                 )
 
             terrainNode.addChildNode(
@@ -1201,11 +2187,9 @@ struct AntColony3DView: UIViewRepresentable {
             )
 
             createSurfaceGrid(
-                simulation:
-                    simulation
+                simulation: simulation
             )
         }
-
 
         private func createSurfaceGrid(
             simulation:
@@ -1213,15 +2197,11 @@ struct AntColony3DView: UIViewRepresentable {
         ) {
 
             let width =
-                CGFloat(
-                    simulation.width
-                )
+                CGFloat(simulation.width)
                 * cellSize
 
             let height =
-                CGFloat(
-                    simulation.height
-                )
+                CGFloat(simulation.height)
                 * cellSize
 
             let material =
@@ -1241,14 +2221,10 @@ struct AntColony3DView: UIViewRepresentable {
 
             let xGeometry =
                 SCNBox(
-                    width:
-                        width,
-                    height:
-                        railHeight,
-                    length:
-                        0.025,
-                    chamferRadius:
-                        0
+                    width: width,
+                    height: railHeight,
+                    length: 0.025,
+                    chamferRadius: 0
                 )
 
             xGeometry.firstMaterial =
@@ -1256,17 +2232,14 @@ struct AntColony3DView: UIViewRepresentable {
 
             let xRail =
                 SCNNode(
-                    geometry:
-                        xGeometry
+                    geometry: xGeometry
                 )
 
             xRail.position =
                 SCNVector3(
                     0,
                     0.30,
-                    Float(
-                        -height / 2
-                    )
+                    Float(-height / 2)
                 )
 
             terrainNode.addChildNode(
@@ -1277,9 +2250,7 @@ struct AntColony3DView: UIViewRepresentable {
                 xRail.clone()
 
             xRail2.position.z =
-                Float(
-                    height / 2
-                )
+                Float(height / 2)
 
             terrainNode.addChildNode(
                 xRail2
@@ -1287,14 +2258,10 @@ struct AntColony3DView: UIViewRepresentable {
 
             let zGeometry =
                 SCNBox(
-                    width:
-                        0.025,
-                    height:
-                        railHeight,
-                    length:
-                        height,
-                    chamferRadius:
-                        0
+                    width: 0.025,
+                    height: railHeight,
+                    length: height,
+                    chamferRadius: 0
                 )
 
             zGeometry.firstMaterial =
@@ -1302,15 +2269,12 @@ struct AntColony3DView: UIViewRepresentable {
 
             let zRail =
                 SCNNode(
-                    geometry:
-                        zGeometry
+                    geometry: zGeometry
                 )
 
             zRail.position =
                 SCNVector3(
-                    Float(
-                        -width / 2
-                    ),
+                    Float(-width / 2),
                     0.30,
                     0
                 )
@@ -1323,85 +2287,63 @@ struct AntColony3DView: UIViewRepresentable {
                 zRail.clone()
 
             zRail2.position.x =
-                Float(
-                    width / 2
-                )
+                Float(width / 2)
 
             terrainNode.addChildNode(
                 zRail2
             )
         }
 
-
-        // MARK: Colony Structure
+        // MARK: - Colony Structure
 
         private func createColonyStructure(
             simulation:
                 AntColonySimulation
         ) {
 
-            for y in
-                0..<simulation.height {
+            for y in 0..<simulation.height {
 
-                for x in
-                    0..<simulation.width {
+                for x in 0..<simulation.width {
 
                     let index =
-                        y
-                        * simulation.width
-                        + x
+                        y * simulation.width + x
 
                     let cell =
-                        simulation.cells[
-                            index
-                        ]
+                        simulation.cells[index]
 
                     switch cell.terrain {
 
                     case .tunnel:
 
                         createTunnel(
-                            x:
-                                x,
-                            y:
-                                y,
-                            simulation:
-                                simulation
+                            x: x,
+                            y: y,
+                            simulation: simulation
                         )
 
                     case .storage:
 
                         createStorage(
-                            x:
-                                x,
-                            y:
-                                y,
-                            cell:
-                                cell,
-                            simulation:
-                                simulation
+                            x: x,
+                            y: y,
+                            cell: cell,
+                            simulation: simulation
                         )
 
                     case .nest:
 
                         createNestCell(
-                            x:
-                                x,
-                            y:
-                                y,
-                            simulation:
-                                simulation
+                            x: x,
+                            y: y,
+                            simulation: simulation
                         )
 
                     case .obstacle:
 
                         createObstacle(
-                            x:
-                                x,
-                            y:
-                                y,
-                            simulation:
-                                simulation
+                            x: x,
+                            y: y,
+                            simulation: simulation
                         )
 
                     default:
@@ -1411,26 +2353,19 @@ struct AntColony3DView: UIViewRepresentable {
             }
         }
 
-
         private func createTunnel(
-            x:
-                Int,
-            y:
-                Int,
+            x: Int,
+            y: Int,
             simulation:
                 AntColonySimulation
         ) {
 
             let geometry =
                 SCNBox(
-                    width:
-                        cellSize * 0.90,
-                    height:
-                        tunnelHeight,
-                    length:
-                        cellSize * 0.90,
-                    chamferRadius:
-                        0.05
+                    width: cellSize * 0.90,
+                    height: tunnelHeight,
+                    length: cellSize * 0.90,
+                    chamferRadius: 0.05
                 )
 
             let material =
@@ -1449,20 +2384,15 @@ struct AntColony3DView: UIViewRepresentable {
 
             let node =
                 SCNNode(
-                    geometry:
-                        geometry
+                    geometry: geometry
                 )
 
             node.position =
                 worldPosition(
-                    x:
-                        x,
-                    y:
-                        y,
-                    depth:
-                        -0.72,
-                    simulation:
-                        simulation
+                    x: x,
+                    y: y,
+                    depth: -0.72,
+                    simulation: simulation
                 )
 
             colonyNode.addChildNode(
@@ -1470,12 +2400,9 @@ struct AntColony3DView: UIViewRepresentable {
             )
         }
 
-
         private func createStorage(
-            x:
-                Int,
-            y:
-                Int,
+            x: Int,
+            y: Int,
             cell:
                 ColonyCell,
             simulation:
@@ -1484,14 +2411,10 @@ struct AntColony3DView: UIViewRepresentable {
 
             let geometry =
                 SCNBox(
-                    width:
-                        cellSize * 0.92,
-                    height:
-                        chamberHeight,
-                    length:
-                        cellSize * 0.92,
-                    chamferRadius:
-                        0.10
+                    width: cellSize * 0.92,
+                    height: chamberHeight,
+                    length: cellSize * 0.92,
+                    chamferRadius: 0.10
                 )
 
             let material =
@@ -1510,27 +2433,21 @@ struct AntColony3DView: UIViewRepresentable {
 
             let node =
                 SCNNode(
-                    geometry:
-                        geometry
+                    geometry: geometry
                 )
 
             node.position =
                 worldPosition(
-                    x:
-                        x,
-                    y:
-                        y,
-                    depth:
-                        -0.86,
-                    simulation:
-                        simulation
+                    x: x,
+                    y: y,
+                    depth: -0.86,
+                    simulation: simulation
                 )
 
             colonyNode.addChildNode(
                 node
             )
 
-            // Storage food visualization.
             if cell.storedFood > 0 {
 
                 let fillGeometry =
@@ -1569,8 +2486,7 @@ struct AntColony3DView: UIViewRepresentable {
 
                 let fill =
                     SCNNode(
-                        geometry:
-                            fillGeometry
+                        geometry: fillGeometry
                     )
 
                 let fillScale =
@@ -1597,14 +2513,10 @@ struct AntColony3DView: UIViewRepresentable {
 
                 fill.position =
                     worldPosition(
-                        x:
-                            x,
-                        y:
-                            y,
-                        depth:
-                            -0.47,
-                        simulation:
-                            simulation
+                        x: x,
+                        y: y,
+                        depth: -0.47,
+                        simulation: simulation
                     )
 
                 colonyNode.addChildNode(
@@ -1613,12 +2525,9 @@ struct AntColony3DView: UIViewRepresentable {
             }
         }
 
-
         private func createNestCell(
-            x:
-                Int,
-            y:
-                Int,
+            x: Int,
+            y: Int,
             simulation:
                 AntColonySimulation
         ) {
@@ -1627,8 +2536,7 @@ struct AntColony3DView: UIViewRepresentable {
                 SCNCylinder(
                     radius:
                         cellSize * 0.38,
-                    height:
-                        0.18
+                    height: 0.18
                 )
 
             geometry.radialSegmentCount =
@@ -1650,20 +2558,15 @@ struct AntColony3DView: UIViewRepresentable {
 
             let node =
                 SCNNode(
-                    geometry:
-                        geometry
+                    geometry: geometry
                 )
 
             node.position =
                 worldPosition(
-                    x:
-                        x,
-                    y:
-                        y,
-                    depth:
-                        -0.53,
-                    simulation:
-                        simulation
+                    x: x,
+                    y: y,
+                    depth: -0.53,
+                    simulation: simulation
                 )
 
             colonyNode.addChildNode(
@@ -1671,26 +2574,19 @@ struct AntColony3DView: UIViewRepresentable {
             )
         }
 
-
         private func createObstacle(
-            x:
-                Int,
-            y:
-                Int,
+            x: Int,
+            y: Int,
             simulation:
                 AntColonySimulation
         ) {
 
             let geometry =
                 SCNBox(
-                    width:
-                        cellSize * 0.80,
-                    height:
-                        0.55,
-                    length:
-                        cellSize * 0.80,
-                    chamferRadius:
-                        0.05
+                    width: cellSize * 0.80,
+                    height: 0.55,
+                    length: cellSize * 0.80,
+                    chamferRadius: 0.05
                 )
 
             let material =
@@ -1707,20 +2603,15 @@ struct AntColony3DView: UIViewRepresentable {
 
             let node =
                 SCNNode(
-                    geometry:
-                        geometry
+                    geometry: geometry
                 )
 
             node.position =
                 worldPosition(
-                    x:
-                        x,
-                    y:
-                        y,
-                    depth:
-                        -0.30,
-                    simulation:
-                        simulation
+                    x: x,
+                    y: y,
+                    depth: -0.30,
+                    simulation: simulation
                 )
 
             terrainNode.addChildNode(
@@ -1728,8 +2619,7 @@ struct AntColony3DView: UIViewRepresentable {
             )
         }
 
-
-        // MARK: Pheromones
+        // MARK: - Pheromones
 
         private func rebuildPheromoneNodes(
             simulation:
@@ -1743,25 +2633,20 @@ struct AntColony3DView: UIViewRepresentable {
                     $0.removeFromParentNode()
                 }
 
-            guard enabled else {
+            guard enabled
+            else {
                 return
             }
 
-            for y in
-                0..<simulation.height {
+            for y in 0..<simulation.height {
 
-                for x in
-                    0..<simulation.width {
+                for x in 0..<simulation.width {
 
                     let index =
-                        y
-                        * simulation.width
-                        + x
+                        y * simulation.width + x
 
                     let cell =
-                        simulation.cells[
-                            index
-                        ]
+                        simulation.cells[index]
 
                     let strength =
                         max(
@@ -1776,8 +2661,7 @@ struct AntColony3DView: UIViewRepresentable {
 
                     let geometry =
                         SCNSphere(
-                            radius:
-                                0.035
+                            radius: 0.035
                         )
 
                     geometry.segmentCount =
@@ -1807,20 +2691,15 @@ struct AntColony3DView: UIViewRepresentable {
 
                     let node =
                         SCNNode(
-                            geometry:
-                                geometry
+                            geometry: geometry
                         )
 
                     node.position =
                         worldPosition(
-                            x:
-                                x,
-                            y:
-                                y,
-                            depth:
-                                -0.40,
-                            simulation:
-                                simulation
+                            x: x,
+                            y: y,
+                            depth: -0.40,
+                            simulation: simulation
                         )
 
                     pheromoneNode
@@ -1831,7 +2710,6 @@ struct AntColony3DView: UIViewRepresentable {
             }
         }
 
-
         private func updatePheromoneValues(
             simulation:
                 AntColonySimulation
@@ -1839,8 +2717,7 @@ struct AntColony3DView: UIViewRepresentable {
 
             let expectedCount =
                 countActivePheromoneCells(
-                    simulation:
-                        simulation
+                    simulation: simulation
                 )
 
             if expectedCount
@@ -1848,10 +2725,8 @@ struct AntColony3DView: UIViewRepresentable {
                     .childNodes.count {
 
                 rebuildPheromoneNodes(
-                    simulation:
-                        simulation,
-                    enabled:
-                        true
+                    simulation: simulation,
+                    enabled: true
                 )
 
                 return
@@ -1859,21 +2734,15 @@ struct AntColony3DView: UIViewRepresentable {
 
             var index = 0
 
-            for y in
-                0..<simulation.height {
+            for y in 0..<simulation.height {
 
-                for x in
-                    0..<simulation.width {
+                for x in 0..<simulation.width {
 
                     let cellIndex =
-                        y
-                        * simulation.width
-                        + x
+                        y * simulation.width + x
 
                     let cell =
-                        simulation.cells[
-                            cellIndex
-                        ]
+                        simulation.cells[cellIndex]
 
                     let strength =
                         max(
@@ -1896,9 +2765,7 @@ struct AntColony3DView: UIViewRepresentable {
 
                     let node =
                         pheromoneNode
-                            .childNodes[
-                                index
-                            ]
+                            .childNodes[index]
 
                     node.geometry?
                         .firstMaterial?
@@ -1915,8 +2782,7 @@ struct AntColony3DView: UIViewRepresentable {
             }
         }
 
-
-        // MARK: Camera
+        // MARK: - Camera
 
         private func resetCamera() {
 
@@ -1942,16 +2808,12 @@ struct AntColony3DView: UIViewRepresentable {
             )
         }
 
-
-        // MARK: Coordinates
+        // MARK: - Coordinates
 
         private func worldPosition(
-            x:
-                Int,
-            y:
-                Int,
-            depth:
-                CGFloat,
+            x: Int,
+            y: Int,
+            depth: CGFloat,
             simulation:
                 AntColonySimulation
         ) -> SCNVector3 {
@@ -1970,15 +2832,13 @@ struct AntColony3DView: UIViewRepresentable {
                 (
                     CGFloat(x)
                     - centerX
-                )
-                * cellSize
+                ) * cellSize
 
             let sceneZ =
                 (
                     CGFloat(y)
                     - centerY
-                )
-                * cellSize
+                ) * cellSize
 
             return SCNVector3(
                 Float(sceneX),
@@ -1987,14 +2847,10 @@ struct AntColony3DView: UIViewRepresentable {
             )
         }
 
-
         private func worldPosition(
-            x:
-                Double,
-            y:
-                Double,
-            depth:
-                CGFloat,
+            x: Double,
+            y: Double,
+            depth: CGFloat,
             simulation:
                 AntColonySimulation
         ) -> SCNVector3 {
@@ -2028,8 +2884,7 @@ struct AntColony3DView: UIViewRepresentable {
             )
         }
 
-
-        // MARK: Helpers
+        // MARK: - Helpers
 
         private func countObstacles(
             simulation:
@@ -2047,7 +2902,6 @@ struct AntColony3DView: UIViewRepresentable {
                 }
             }
         }
-
 
         private func countActivePheromoneCells(
             simulation:
@@ -2068,14 +2922,9 @@ struct AntColony3DView: UIViewRepresentable {
             }
         }
 
-
-        // IMPORTANT:
-        // Use SCNVector3 here.
         private func distanceSquared(
-            _ a:
-                SCNVector3,
-            _ b:
-                SCNVector3
+            _ a: SCNVector3,
+            _ b: SCNVector3
         ) -> Float {
 
             let dx =
@@ -2093,6 +2942,7 @@ struct AntColony3DView: UIViewRepresentable {
                 + dz * dz
         }
 
+        // MARK: - Materials
 
         private func antMaterial()
             -> SCNMaterial {
@@ -2115,7 +2965,6 @@ struct AntColony3DView: UIViewRepresentable {
             return material
         }
 
-
         private func stateMaterial()
             -> SCNMaterial {
 
@@ -2133,7 +2982,6 @@ struct AntColony3DView: UIViewRepresentable {
 
             return material
         }
-
 
         private func stateEmission(
             state:
@@ -2191,7 +3039,6 @@ struct AntColony3DView: UIViewRepresentable {
             }
         }
 
-
         private func foodColor(
             type:
                 FoodType
@@ -2241,8 +3088,7 @@ struct AntColony3DView: UIViewRepresentable {
             }
         }
 
-
-        // MARK: Stop
+        // MARK: - Stop
 
         func stop() {
 
@@ -2258,13 +3104,17 @@ struct AntColony3DView: UIViewRepresentable {
                     $0.removeFromParentNode()
                 }
 
+            invaderNodes.values
+                .forEach {
+                    $0.removeFromParentNode()
+                }
+
             antNodes.removeAll()
-
             foodNodes.removeAll()
+            invaderNodes.removeAll()
 
-            lastAntPositions
-                .removeAll()
+            lastAntPositions.removeAll()
+            lastInvaderPositions.removeAll()
         }
     }
 }
-
