@@ -13,6 +13,8 @@ import Combine
 
 @MainActor
 final class AntColonySimulation: ObservableObject {
+    private let reproductionInterval = 10
+    
     @Published var colonyAlarm = 0.0
     
     let detectionRadius = 20.0
@@ -1537,34 +1539,31 @@ final class AntColonySimulation: ObservableObject {
             )
     }
 
-    // MARK: Reproduction
-
     private func populationDynamics() {
 
-        guard generation % 20 == 0 else {
+        // Reproduction is evaluated according to the configured
+        // reproduction interval rather than every generation.
+        guard generation % reproductionInterval == 0 else {
             return
         }
 
-        guard ants.count <
-                maximumPopulation
-        else {
+        // Do not reproduce beyond the colony population limit.
+        guard ants.count < maximumPopulation else {
             return
         }
 
         // -------------------------------------------------
-        // REPRODUCTION IS NOW DIRECTLY CONTROLLED BY
+        // REPRODUCTION IS DIRECTLY CONTROLLED BY
         // PHYSICAL FOOD STORAGE.
         // -------------------------------------------------
 
-        let minimumFoodForBreeding =
-            20.0
+        let minimumFoodForBreeding = 5.0
 
-        guard storedFood >=
-                minimumFoodForBreeding
-        else {
+        guard storedFood >= minimumFoodForBreeding else {
             return
         }
 
+        // Food-storage health.
         let foodRatio =
             min(
                 1.0,
@@ -1575,6 +1574,7 @@ final class AntColonySimulation: ObservableObject {
                 )
             )
 
+        // Colony energy available per ant.
         let energyPerAnt =
             colonyEnergy /
             Double(
@@ -1588,8 +1588,13 @@ final class AntColonySimulation: ObservableObject {
             return
         }
 
-        // Reproduction probability increases
-        // as food storage becomes healthier.
+        // -------------------------------------------------
+        // REPRODUCTION RATE
+        // -------------------------------------------------
+        // Birth rate increases as food storage becomes
+        // healthier, up to the configured maximum.
+        // -------------------------------------------------
+
         let reproductionRate =
             min(
                 0.035,
@@ -1597,6 +1602,8 @@ final class AntColonySimulation: ObservableObject {
                 foodRatio * 0.030
             )
 
+        // Calculate the number of workers requested
+        // during this reproduction cycle.
         let requestedBirths =
             max(
                 1,
@@ -1608,6 +1615,7 @@ final class AntColonySimulation: ObservableObject {
                 )
             )
 
+        // Never exceed the colony population capacity.
         let availableSlots =
             maximumPopulation -
             ants.count
@@ -1618,9 +1626,11 @@ final class AntColonySimulation: ObservableObject {
                 availableSlots
             )
 
-        // Each new worker consumes stored food.
-        let foodCostPerBirth =
-            12.0
+        // -------------------------------------------------
+        // FOOD COST
+        // -------------------------------------------------
+
+        let foodCostPerBirth = 12.0
 
         let totalFoodCost =
             Double(
@@ -1628,16 +1638,17 @@ final class AntColonySimulation: ObservableObject {
             ) *
             foodCostPerBirth
 
-        guard storedFood >=
-                totalFoodCost
-        else {
+        guard storedFood >= totalFoodCost else {
             return
         }
 
-        // Stored food is explicitly consumed
-        // to produce new workers.
-        storedFood -=
-            totalFoodCost
+        // Consume the food required to produce
+        // the new workers.
+        storedFood -= totalFoodCost
+
+        // -------------------------------------------------
+        // CREATE NEW WORKERS
+        // -------------------------------------------------
 
         for _ in 0..<birthCount {
 
@@ -1688,11 +1699,10 @@ final class AntColonySimulation: ObservableObject {
             )
         }
 
-        births +=
-            birthCount
+        // Record the number of successful births.
+        births += birthCount
     }
 
-    // MARK: Mortality
 
     private func removeDeadAnts() {
 
@@ -3018,7 +3028,10 @@ extension AntColonySimulation {
         guard invaders.count < maximumInvaders else {
             return
         }
-
+        
+        guard defenseGeneration >= nextInvaderGeneration else {
+               return
+           }
     
         let colonyPressure = min(
             1.0,
