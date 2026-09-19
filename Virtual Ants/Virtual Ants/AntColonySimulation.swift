@@ -127,6 +127,16 @@ final class AntColonySimulation: ObservableObject {
     // Maximum number of food patches outside the colony.
     private let maximumFoodSources = 95
 
+    // Per-chamber food capacity. Kept as one named constant so
+    // the colony-wide storageCapacity total and each individual
+    // chamber's fill level in the grid never drift apart.
+    private let chamberFoodCapacity = 85.0
+
+    // The colony's most recently computed reproduction rate.
+    // Construction planning reads this to anticipate population
+    // growth instead of only reacting after the fact.
+    private var currentReproductionRate: Double = 0.0
+
     private var nextFoodGeneration = 1
 
     // MARK: Construction
@@ -1222,28 +1232,72 @@ final class AntColonySimulation: ObservableObject {
                 nestCellCount
             )
 
-        // More workers create more construction pressure.
+        let foodRatio =
+            min(
+                1.0,
+                storedFood /
+                max(storageCapacity, 1.0)
+            )
+
+        // How fast the colony is currently producing new ants.
+        // currentReproductionRate typically sits in roughly
+        // 0.016...0.113 — normalize it into a 0...1 "growth
+        // pressure" signal so building can anticipate an
+        // incoming population increase instead of only reacting
+        // once the nest is already overcrowded.
+        let growthPressure =
+            min(
+                1.0,
+                currentReproductionRate / 0.113
+            )
+
+        // More workers — and a colony actively growing quickly —
+        // create construction pressure. A high birth rate makes
+        // the colony build ahead of the population it's about to
+        // have, not just the population it already has.
+        let anticipatedPopulationArea =
+            requiredPopulationArea *
+            (1.0 + growthPressure * 0.6)
+
         if currentNestArea <
-            requiredPopulationArea {
+            anticipatedPopulationArea {
+
+            let chance =
+                0.035 +
+                growthPressure * 0.045
 
             return Double.random(
                 in: 0...1
-            ) < 0.035
+            ) < chance
         }
 
-        // Storage shortage creates additional construction.
-        if storedFood >
-            storageCapacity * 0.75 {
+        // Food-supply-driven construction. Rather than a single
+        // hard cutoff, the chance scales smoothly with how full
+        // storage is running — a well-fed colony with room to
+        // spare keeps investing in more chambers, while one that's
+        // merely comfortable builds more modestly.
+        if foodRatio >
+            0.40 {
+
+            let chance =
+                0.010 +
+                (foodRatio - 0.40) * 0.045
 
             return Double.random(
                 in: 0...1
-            ) < 0.025
+            ) < chance
         }
 
-        // Normal maintenance.
+        // Baseline maintenance construction — throttled back when
+        // food is scarce, since a hungry colony should prioritize
+        // foraging over digging new rooms.
+        let baseline =
+            0.004 *
+            max(0.25, foodRatio)
+
         return Double.random(
             in: 0...1
-        ) < 0.004
+        ) < baseline
     }
 
     private func moveConstructionAnt(
@@ -1602,6 +1656,16 @@ final class AntColonySimulation: ObservableObject {
         storedFood +=
             amountStored
 
+        // Physically place the food in a nearby chamber so it
+        // actually appears to accumulate where the colony built
+        // room for it, rather than only existing as an abstract
+        // total.
+        depositIntoStorageChambers(
+            nearX: ants[antIndex].x,
+            nearY: ants[antIndex].y,
+            amount: amountStored
+        )
+
         foodCollected +=
             amountStored
 
@@ -1709,6 +1773,10 @@ final class AntColonySimulation: ObservableObject {
             storedFood - consumptionRate
         )
 
+        withdrawFromStorageChambers(
+            amount: consumptionRate
+        )
+
         colonyEnergy = min(
             100_000,
             colonyEnergy + consumptionRate * 7.0
@@ -1719,14 +1787,20 @@ final class AntColonySimulation: ObservableObject {
         guard generation % reproductionInterval == 0 else { return }
 
         // Do not reproduce beyond the colony population limit.
-        guard ants.count < maximumPopulation else { return }
+        guard ants.count < maximumPopulation else {
+            currentReproductionRate = 0.0
+            return
+        }
 
         // Stored food is the colony's brood-care reserve.
         // With no meaningful reserve, workers must concentrate on foraging
         // rather than caring for eggs and larvae.
         let minimumFoodForBreeding = 4.0
 
-        guard storedFood >= minimumFoodForBreeding else { return }
+        guard storedFood >= minimumFoodForBreeding else {
+            currentReproductionRate = 0.0
+            return
+        }
 
         let foodRatio = min(
             1.0,
@@ -1735,7 +1809,10 @@ final class AntColonySimulation: ObservableObject {
 
         let energyPerAnt = colonyEnergy / Double(max(ants.count, 1))
 
-        guard energyPerAnt >= 1.5 else { return }
+        guard energyPerAnt >= 1.5 else {
+            currentReproductionRate = 0.0
+            return
+        }
 
         // Storage changes how much of the colony can focus on brood care.
         //
@@ -1771,6 +1848,11 @@ final class AntColonySimulation: ObservableObject {
             baseReproductionRate +
             broodCareFactor * maximumBroodCareBonus
         )
+
+        // Exposed so construction planning can anticipate growth
+        // rather than only reacting once the colony is already
+        // overcrowded.
+        currentReproductionRate = reproductionRate
 
         // Calculate births requested this cycle.
         let requestedBirths = max(
@@ -1823,6 +1905,10 @@ final class AntColonySimulation: ObservableObject {
         storedFood = max(
             0,
             storedFood - totalFoodCost
+        )
+
+        withdrawFromStorageChambers(
+            amount: totalFoodCost
         )
 
         // A small amount of immediate colony energy represents heating,
@@ -2150,7 +2236,7 @@ final class AntColonySimulation: ObservableObject {
         let chamberCapacity =
             Double(
                 storageCells
-            ) * 85.0
+            ) * chamberFoodCapacity
 
         storageCapacity =
             base +
@@ -2161,6 +2247,124 @@ final class AntColonySimulation: ObservableObject {
                 storedFood,
                 storageCapacity
             )
+    }
+
+    // MARK: Spatial Chamber Storage
+    //
+    // storedFood remains the authoritative colony-wide total that
+    // drives reproduction, energy conversion, and every other
+    // game-rule check. These two helpers keep each individual
+    // .storage cell's own storedFood field (used for the 3D
+    // chamber-fill visualization) in sync with that total, so
+    // food actually appears to pile up in the chambers ants built
+    // for it, and drains back out of them as it's consumed.
+
+    /// Deposits `amount` of food into the nearest storage
+    /// chambers with remaining room, closest first. Any portion
+    /// that doesn't fit in a physical chamber (e.g. no chambers
+    /// built yet) is still tracked in the colony-wide total via
+    /// the base nest allowance — this only distributes the part
+    /// that fits.
+    private func depositIntoStorageChambers(
+        nearX: Double,
+        nearY: Double,
+        amount: Double
+    ) {
+
+        guard amount > 0 else {
+            return
+        }
+
+        var remaining = amount
+
+        let candidateIndices =
+            cells.indices
+                .filter {
+                    cells[$0].terrain == .storage &&
+                    cells[$0].storedFood < chamberFoodCapacity
+                }
+                .sorted {
+                    let x0 = Double($0 % width)
+                    let y0 = Double($0 / width)
+                    let x1 = Double($1 % width)
+                    let y1 = Double($1 / width)
+
+                    let dx0 = x0 - nearX
+                    let dy0 = y0 - nearY
+                    let dx1 = x1 - nearX
+                    let dy1 = y1 - nearY
+
+                    return (dx0 * dx0 + dy0 * dy0) <
+                        (dx1 * dx1 + dy1 * dy1)
+                }
+
+        for index in candidateIndices {
+
+            guard remaining > 0 else {
+                break
+            }
+
+            let room =
+                chamberFoodCapacity -
+                cells[index].storedFood
+
+            let deposit =
+                min(
+                    room,
+                    remaining
+                )
+
+            cells[index].storedFood +=
+                deposit
+
+            remaining -=
+                deposit
+        }
+    }
+
+    /// Removes `amount` of food from storage chambers, taking
+    /// from the fullest chambers first so consumption reads
+    /// naturally (the colony draws down its biggest reserves
+    /// before scraping empty ones).
+    private func withdrawFromStorageChambers(
+        amount: Double
+    ) {
+
+        guard amount > 0 else {
+            return
+        }
+
+        var remaining = amount
+
+        let candidateIndices =
+            cells.indices
+                .filter {
+                    cells[$0].terrain == .storage &&
+                    cells[$0].storedFood > 0
+                }
+                .sorted {
+                    cells[$0].storedFood >
+                    cells[$1].storedFood
+                }
+
+        for index in candidateIndices {
+
+            guard remaining > 0 else {
+                break
+            }
+
+            let withdrawal =
+                min(
+                    cells[index].storedFood,
+                    remaining
+                )
+
+            cells[index].storedFood -=
+                withdrawal
+
+            remaining -=
+                withdrawal
+        }
     }
 
     // MARK: Food Cleanup
@@ -2716,8 +2920,17 @@ final class AntColonySimulation: ObservableObject {
 
     func addFoodNow() {
 
+        // Player-triggered drops get a small buffer above the
+        // ambient generation cap. Previously this used the same
+        // maximumFoodSources ceiling as passive generation, so
+        // once the map naturally filled up (which happens quickly
+        // during normal play) pressing the button silently did
+        // nothing at all.
+        let manualDropCeiling =
+            maximumFoodSources + 15
+
         guard foodSources.count <
-                maximumFoodSources
+                manualDropCeiling
         else {
             return
         }
@@ -2733,6 +2946,69 @@ final class AntColonySimulation: ObservableObject {
 
         for _ in 0..<count {
             createFoodSource()
+        }
+    }
+
+    // MARK: All Hands
+
+    /// Player-triggered emergency mobilization. Unlike the
+    /// automatic `recruitDefenders()`, which only pulls in ants
+    /// already within `recruitmentRadius` of an invader and only
+    /// once the defense cellular automaton has generated a
+    /// threat/alarm/defender signal there, this ignores both
+    /// limits: every eligible ant colony-wide is immediately sent
+    /// after the nearest live invader. It's meant as a deliberate
+    /// player override for when the automatic response isn't
+    /// reacting fast enough.
+    func allHandsOnDeck() {
+
+        let activeInvaders =
+            invaders.filter {
+                $0.alive &&
+                $0.health > 0.0
+            }
+
+        guard !activeInvaders.isEmpty else {
+            return
+        }
+
+        for antIndex in ants.indices {
+
+            // Let ants already hauling food home finish that trip
+            // rather than dropping it mid-corridor.
+            guard !ants[antIndex].hasFood else {
+                continue
+            }
+
+            let antX = ants[antIndex].x
+            let antY = ants[antIndex].y
+
+            var nearestInvader: ColonyInvader?
+            var nearestDistance = Double.infinity
+
+            for invader in activeInvaders {
+
+                let d =
+                    distance(
+                        x1: antX,
+                        y1: antY,
+                        x2: invader.x,
+                        y2: invader.y
+                    )
+
+                if d < nearestDistance {
+                    nearestDistance = d
+                    nearestInvader = invader
+                }
+            }
+
+            guard let target = nearestInvader else {
+                continue
+            }
+
+            ants[antIndex].defending = true
+            ants[antIndex].defenseTargetID = target.id
+            ants[antIndex].state = .defending
         }
     }
 

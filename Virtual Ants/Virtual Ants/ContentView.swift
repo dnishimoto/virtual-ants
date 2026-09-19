@@ -53,21 +53,23 @@ var body: some View {
                 cameraResetToken: cameraResetToken
             )
             .frame(
-                minHeight: 620
+                minHeight: 320
             )
             .clipShape(
                 RoundedRectangle(
                     cornerRadius: 18
                 )
             )
-
-            controlPanel
-
-            visualizationPanel
-
-            statisticsPanel
-
-            developmentPanel
+            ScrollView
+            {
+                controlPanel
+                
+                visualizationPanel
+                
+                statisticsPanel
+                
+                developmentPanel
+            }
         }
         .padding()
     }
@@ -283,138 +285,104 @@ private extension ContentView {
     }
 }
 private extension ContentView {
+    private func compactThreatValue(
+        _ title: String,
+        value: Int,
+        icon: String
+    ) -> some View {
+        HStack(spacing: 2) {
+            Image(systemName: icon)
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(invaderThreatColor)
 
-var invaderThreatPanel: some View {
+            Text("\(value)")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .monospacedDigit()
 
-    VStack(
-        alignment: .leading,
-        spacing: 12
-    ) {
-
-        HStack {
-
-            HStack(spacing: 8) {
-
-                Image(
-                    systemName: invaderThreatIcon
-                )
-                .font(
-                    .system(
-                        size: 22,
-                        weight: .bold
-                    )
-                )
-                .foregroundStyle(
-                    invaderThreatColor
-                )
+            Text(title)
+                .font(.system(size: 7, weight: .bold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+    var invaderThreatPanel: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: invaderThreatIcon)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(invaderThreatColor)
 
                 Text("INVADER THREAT")
-                    .font(
-                        .headline.weight(.bold)
+                    .font(.system(size: 11, weight: .heavy))
+                    .lineLimit(1)
+
+                Spacer(minLength: 3)
+
+                Text(invaderThreatStatus)
+                    .font(.system(size: 8, weight: .heavy))
+                    .foregroundStyle(invaderThreatColor)
+                    .lineLimit(1)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(invaderThreatColor.opacity(0.16))
                     )
             }
 
-            Spacer()
+            HStack(spacing: 4) {
+                compactThreatValue(
+                    "INV",
+                    value: simulation.invaders.filter(\.alive).count,
+                    icon: "exclamationmark.triangle.fill"
+                )
 
-            Text(invaderThreatStatus)
-                .font(
-                    .caption.weight(.bold)
+                compactThreatValue(
+                    "DEF",
+                    value: simulation.defendersActive,
+                    icon: "shield.fill"
                 )
-                .foregroundStyle(
-                    invaderThreatColor
+
+                compactThreatValue(
+                    "KO",
+                    value: simulation.invadersDefeated,
+                    icon: "checkmark.shield.fill"
                 )
-                .padding(
-                    .horizontal,
-                    9
+
+                compactThreatValue(
+                    "BR",
+                    value: simulation.invaderBreaches,
+                    icon: "arrow.triangle.branch"
                 )
-                .padding(
-                    .vertical,
-                    5
+            }
+
+            ZStack(alignment: .trailing) {
+                ProgressView(
+                    value: min(max(simulation.defensiveAlarm, 0), 1)
                 )
-                .background(
-                    Capsule()
-                        .fill(
-                            invaderThreatColor.opacity(0.16)
-                        )
-                )
+                .tint(invaderThreatColor)
+                .scaleEffect(y: 0.55)
+                .frame(height: 6)
+
+                Text("ALARM \(String(format: "%.2f", simulation.defensiveAlarm))")
+                    .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .padding(.trailing, 2)
+            }
         }
-
-        HStack(spacing: 10) {
-
-            threatMetric(
-                title: "INVADERS",
-                value: "\(simulation.invaders.filter { $0.alive }.count)",
-                systemImage: "exclamationmark.triangle.fill"
-            )
-
-            threatMetric(
-                title: "DEFENDERS",
-                value: "\(simulation.defendersActive)",
-                systemImage: "shield.fill"
-            )
-
-            threatMetric(
-                title: "DEFEATED",
-                value: "\(simulation.invadersDefeated)",
-                systemImage: "checkmark.shield.fill"
-            )
-
-            threatMetric(
-                title: "BREACHES",
-                value: "\(simulation.invaderBreaches)",
-                systemImage: "arrow.triangle.branch"
-            )
-        }
-
-        HStack(spacing: 8) {
-
-            Text("DEFENSIVE ALARM")
-
-            Spacer()
-
-            Text(
-                String(
-                    format: "%.2f",
-                    simulation.defensiveAlarm
-                )
-            )
-            .monospacedDigit()
-            .fontWeight(.bold)
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-
-        ProgressView(
-            value: min(
-                max(
-                    simulation.defensiveAlarm,
-                    0.0
-                ),
-                1.0
-            )
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: 230, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(invaderThreatColor.opacity(0.08))
         )
-        .tint(invaderThreatColor)
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(invaderThreatColor.opacity(0.30), lineWidth: 1)
+        )
     }
-    .padding()
-    .background(
-        RoundedRectangle(
-            cornerRadius: 14
-        )
-        .fill(
-            invaderThreatColor.opacity(0.08)
-        )
-    )
-    .overlay(
-        RoundedRectangle(
-            cornerRadius: 14
-        )
-        .stroke(
-            invaderThreatColor.opacity(0.35),
-            lineWidth: 1
-        )
-    )
-}
-
 func threatMetric(
     title: String,
     value: String,
@@ -628,24 +596,54 @@ var controlPanel: some View {
             )
         }
 
-        Button {
+        HStack(
+            spacing: 10
+        ) {
 
-            cameraResetToken = UUID()
+            Button {
 
-        } label: {
+                cameraResetToken = UUID()
 
-            Label(
-                "RESET CAMERA",
-                systemImage:
-                    "camera.rotate"
+            } label: {
+
+                Label(
+                    "RESET CAMERA",
+                    systemImage:
+                        "camera.rotate"
+                )
+                .frame(
+                    maxWidth: .infinity
+                )
+            }
+            .buttonStyle(
+                .bordered
             )
-            .frame(
-                maxWidth: .infinity
+
+            Button {
+
+                simulation.allHandsOnDeck()
+
+            } label: {
+
+                Label(
+                    "ALL HANDS",
+                    systemImage:
+                        "shield.lefthalf.filled"
+                )
+                .frame(
+                    maxWidth: .infinity
+                )
+            }
+            .buttonStyle(
+                .borderedProminent
+            )
+            .tint(.red)
+            .disabled(
+                !simulation.invaders.contains {
+                    $0.alive && $0.health > 0.0
+                }
             )
         }
-        .buttonStyle(
-            .bordered
-        )
     }
 }
 
@@ -748,21 +746,8 @@ var statisticsPanel: some View {
         spacing: 10
     ) {
 
-        statistic(
-            title: "Stored Food",
-            value: String(
-                format: "%.1f",
-                simulation.storedFood
-            )
-        )
-
-        statistic(
-            title: "Food Capacity",
-            value: String(
-                format: "%.1f",
-                simulation.storageCapacity
-            )
-        )
+     
+       
 
         statistic(
             title: "Colony Energy",
@@ -772,11 +757,6 @@ var statisticsPanel: some View {
             )
         )
 
-        statistic(
-            title: "Workers",
-            value:
-                "\(simulation.ants.count)"
-        )
 
         statistic(
             title: "Tunnels",
@@ -784,11 +764,6 @@ var statisticsPanel: some View {
                 "\(simulation.tunnelsBuilt)"
         )
 
-        statistic(
-            title: "Storage Chambers",
-            value:
-                "\(simulation.storageChambersBuilt)"
-        )
 
         statistic(
             title: "Searching",
@@ -808,23 +783,7 @@ var statisticsPanel: some View {
                 "\(simulation.buildingCount)"
         )
 
-        statistic(
-            title: "Food Sources",
-            value:
-                "\(simulation.foodSources.count)"
-        )
-
-        statistic(
-            title: "Active Invaders",
-            value:
-                "\(activeInvaderCount)"
-        )
-
-        statistic(
-            title: "Defense Generation",
-            value:
-                "\(simulation.defenseGeneration)"
-        )
+    
     }
 }
 
@@ -915,5 +874,3 @@ var developmentPanel: some View {
 #Preview {
 ContentView()
 }
-
-
