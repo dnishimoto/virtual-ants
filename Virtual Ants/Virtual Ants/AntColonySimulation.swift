@@ -1639,6 +1639,37 @@ final class AntColonySimulation: ObservableObject {
             ants[antIndex].carriedFoodType
             ?? .seed
 
+        // The returning ant eats a small personal ration from
+        // what it's carrying before the rest goes to storage.
+        // This is what actually refuels the ant — replacing the
+        // old flat, food-independent energy bonus — and a share
+        // of what it eats also builds colonyEnergy, since a fed
+        // forager is directly what keeps the colony running.
+        let selfFeedAmount =
+            min(
+                amount,
+                2.0
+            )
+
+        let selfFeedEnergy =
+            selfFeedAmount *
+            type.energyPerUnit
+
+        ants[antIndex].energy =
+            min(
+                100,
+                ants[antIndex].energy +
+                selfFeedEnergy
+            )
+
+        colonyEnergy +=
+            selfFeedEnergy *
+            0.35
+
+        let remainingAfterSelfFeed =
+            amount -
+            selfFeedAmount
+
         // Food physically enters colony storage.
         let availableCapacity =
             max(
@@ -1649,7 +1680,7 @@ final class AntColonySimulation: ObservableObject {
 
         let amountStored =
             min(
-                amount,
+                remainingAfterSelfFeed,
                 availableCapacity
             )
 
@@ -1674,7 +1705,7 @@ final class AntColonySimulation: ObservableObject {
         let overflow =
             max(
                 0,
-                amount -
+                remainingAfterSelfFeed -
                 amountStored
             )
 
@@ -1687,12 +1718,6 @@ final class AntColonySimulation: ObservableObject {
 
         ants[antIndex].carriedFoodType =
             nil
-
-        ants[antIndex].energy =
-            min(
-                100,
-                ants[antIndex].energy + 25
-            )
 
         ants[antIndex].state =
             .resting
@@ -2918,20 +2943,23 @@ final class AntColonySimulation: ObservableObject {
 
     // MARK: Manual Food
 
+    // Player-triggered drops get a small buffer above the
+    // ambient generation cap. Previously this used the same
+    // maximumFoodSources ceiling as passive generation, so
+    // once the map naturally filled up (which happens quickly
+    // during normal play) pressing the button silently did
+    // nothing at all. Exposed so the UI can reflect this too.
+    var manualFoodDropCeiling: Int {
+        maximumFoodSources + 15
+    }
+
+    var canAddFoodNow: Bool {
+        foodSources.count < manualFoodDropCeiling
+    }
+
     func addFoodNow() {
 
-        // Player-triggered drops get a small buffer above the
-        // ambient generation cap. Previously this used the same
-        // maximumFoodSources ceiling as passive generation, so
-        // once the map naturally filled up (which happens quickly
-        // during normal play) pressing the button silently did
-        // nothing at all.
-        let manualDropCeiling =
-            maximumFoodSources + 15
-
-        guard foodSources.count <
-                manualDropCeiling
-        else {
+        guard canAddFoodNow else {
             return
         }
 
@@ -2970,6 +2998,39 @@ final class AntColonySimulation: ObservableObject {
 
         guard !activeInvaders.isEmpty else {
             return
+        }
+
+        initializeDefenseSystem()
+
+        // Elevate the colony's alert immediately so an "all
+        // hands" call visibly reads as a real emergency, not just
+        // a quiet background reassignment of ants. Setting the
+        // published value gives instant UI feedback; seeding the
+        // underlying cellular automaton (alarm/defenderSignal)
+        // makes that elevation actually sustain itself through
+        // propagation and gradual dissipation on the following
+        // defense steps, instead of being overwritten back down
+        // the moment defensiveAlarm is next recalculated.
+        defensiveAlarm =
+            min(
+                1.0,
+                max(
+                    defensiveAlarm,
+                    0.85
+                )
+            )
+
+        for index in defenseCells.indices {
+
+            defenseCells[index].alarm =
+                min(
+                    1.0,
+                    defenseCells[index].alarm +
+                    0.6
+                )
+
+            defenseCells[index].defenderSignal =
+                1.0
         }
 
         for antIndex in ants.indices {

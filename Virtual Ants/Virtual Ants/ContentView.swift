@@ -290,14 +290,28 @@ private extension ContentView {
         value: Int,
         icon: String
     ) -> some View {
+        compactThreatValue(
+            title,
+            value: "\(value)",
+            icon: icon
+        )
+    }
+
+    private func compactThreatValue(
+        _ title: String,
+        value: String,
+        icon: String
+    ) -> some View {
         HStack(spacing: 2) {
             Image(systemName: icon)
                 .font(.system(size: 8, weight: .bold))
                 .foregroundStyle(invaderThreatColor)
 
-            Text("\(value)")
+            Text(value)
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
 
             Text(title)
                 .font(.system(size: 7, weight: .bold))
@@ -345,6 +359,12 @@ private extension ContentView {
                 )
 
                 compactThreatValue(
+                    "TIME",
+                    value: longestInvaderTimeAliveLabel,
+                    icon: "clock.fill"
+                )
+
+                compactThreatValue(
                     "KO",
                     value: simulation.invadersDefeated,
                     icon: "checkmark.shield.fill"
@@ -383,54 +403,43 @@ private extension ContentView {
                 .stroke(invaderThreatColor.opacity(0.30), lineWidth: 1)
         )
     }
-func threatMetric(
-    title: String,
-    value: String,
-    systemImage: String
-) -> some View {
-
-    VStack(
-        alignment: .leading,
-        spacing: 5
-    ) {
-
-        Image(
-            systemName: systemImage
-        )
-        .font(
-            .caption
-        )
-        .foregroundStyle(
-            invaderThreatColor
-        )
-
-        Text(value)
-            .font(
-                .system(
-                    size: 17,
-                    weight: .bold,
-                    design: .rounded
-                )
-            )
-            .monospacedDigit()
-
-        Text(title)
-            .font(
-                .system(
-                    size: 9,
-                    weight: .bold
-                )
-            )
-            .foregroundStyle(.secondary)
-    }
-    .frame(
-        maxWidth: .infinity,
-        alignment: .leading
-    )
-}
 
 var activeInvaderCount: Int {
     simulation.invaders.filter { $0.alive }.count
+}
+
+// Age is incremented once per defense-system step, which itself
+// runs every 3 simulation generations. The simulation timer fires
+// every 0.07s, so each defense step is 3 * 0.07 = 0.21s of
+// real time.
+private var secondsPerInvaderAgeTick: Double {
+    3.0 * 0.07
+}
+
+var longestInvaderTimeAlive: Double {
+
+    let oldestAge =
+        simulation.invaders
+            .filter { $0.alive }
+            .map { $0.age }
+            .max() ?? 0
+
+    return Double(oldestAge) * secondsPerInvaderAgeTick
+}
+
+var longestInvaderTimeAliveLabel: String {
+
+    guard activeInvaderCount > 0 else {
+        return "—"
+    }
+
+    let seconds = Int(longestInvaderTimeAlive)
+
+    if seconds < 60 {
+        return "\(seconds)s"
+    }
+
+    return "\(seconds / 60)m\(seconds % 60)s"
 }
 
 var invaderThreatLevel: Double {
@@ -593,6 +602,14 @@ var controlPanel: some View {
             }
             .buttonStyle(
                 .bordered
+            )
+            .tint(
+                simulation.canAddFoodNow
+                ? .green
+                : .gray
+            )
+            .disabled(
+                !simulation.canAddFoodNow
             )
         }
 
