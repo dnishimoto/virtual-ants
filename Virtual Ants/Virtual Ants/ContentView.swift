@@ -64,10 +64,10 @@ var body: some View {
             {
                 controlPanel
                 
-                visualizationPanel
-                
                 statisticsPanel
                 
+                visualizationPanel
+         
                 developmentPanel
             }
         }
@@ -534,137 +534,82 @@ private extension ContentView {
 
 
 var controlPanel: some View {
-
-    VStack(
-        spacing: 12
-    ) {
-
-        HStack(
-            spacing: 10
-        ) {
-
-            Button {
-
+    VStack(spacing: 6) {
+        HStack(spacing: 6) {
+            controlIconButton(
+                systemImage: isPaused ? "play.fill" : "pause.fill",
+                title: isPaused ? "Run simulation" : "Pause simulation",
+                tint: .blue,
+                prominent: true
+            ) {
                 isPaused.toggle()
-
-            } label: {
-
-                Label(
-                    isPaused
-                    ? "RUN"
-                    : "PAUSE",
-                    systemImage:
-                        isPaused
-                        ? "play.fill"
-                        : "pause.fill"
-                )
-                .frame(
-                    maxWidth: .infinity
-                )
             }
-            .buttonStyle(
-                .borderedProminent
-            )
 
-            Button {
-
+            controlIconButton(
+                systemImage: "forward.fill",
+                title: "Advance one simulation step",
+                tint: .secondary
+            ) {
                 simulation.step()
-
-            } label: {
-
-                Label(
-                    "STEP",
-                    systemImage:
-                        "forward.fill"
-                )
-                .frame(
-                    maxWidth: .infinity
-                )
             }
-            .buttonStyle(
-                .bordered
-            )
 
-            Button {
-
+            controlIconButton(
+                systemImage: "leaf.fill",
+                title: "Add food",
+                tint: .green,
+                isEnabled: simulation.canAddFoodNow
+            ) {
                 simulation.addFoodNow()
-
-            } label: {
-
-                Label(
-                    "ADD FOOD",
-                    systemImage:
-                        "leaf.fill"
-                )
-                .frame(
-                    maxWidth: .infinity
-                )
             }
-            .buttonStyle(
-                .bordered
-            )
-            .tint(
-                simulation.canAddFoodNow
-                ? .green
-                : .gray
-            )
-            .disabled(
-                !simulation.canAddFoodNow
-            )
-        }
 
-        HStack(
-            spacing: 10
-        ) {
-
-            Button {
-
+            controlIconButton(
+                systemImage: "camera.rotate",
+                title: "Reset camera",
+                tint: .secondary
+            ) {
                 cameraResetToken = UUID()
-
-            } label: {
-
-                Label(
-                    "RESET CAMERA",
-                    systemImage:
-                        "camera.rotate"
-                )
-                .frame(
-                    maxWidth: .infinity
-                )
             }
-            .buttonStyle(
-                .bordered
-            )
 
-            Button {
-
-                simulation.allHandsOnDeck()
-
-            } label: {
-
-                Label(
-                    "ALL HANDS",
-                    systemImage:
-                        "shield.lefthalf.filled"
-                )
-                .frame(
-                    maxWidth: .infinity
-                )
-            }
-            .buttonStyle(
-                .borderedProminent
-            )
-            .tint(.red)
-            .disabled(
-                !simulation.invaders.contains {
+            controlIconButton(
+                systemImage: "shield.lefthalf.filled",
+                title: "All hands on deck",
+                tint: .red,
+                prominent: true,
+                isEnabled: simulation.invaders.contains {
                     $0.alive && $0.health > 0.0
                 }
-            )
+            ) {
+                simulation.allHandsOnDeck()
+            }
         }
     }
+    .padding(7)
+    .background(
+        RoundedRectangle(cornerRadius: 9, style: .continuous)
+            .fill(Color.white.opacity(0.06))
+    )
 }
 
-
+    private func controlIconButton(
+        systemImage: String,
+        title: String,
+        tint: Color,
+        prominent: Bool = false,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .bold))
+                .frame(width: 36, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .tint(isEnabled ? tint : .gray)
+        .disabled(!isEnabled)
+        .accessibilityLabel(title)
+        .help(title)
+    }
 }
 
 // MARK: - Visualization Controls
@@ -672,175 +617,178 @@ var controlPanel: some View {
 private extension ContentView {
 
 
-var visualizationPanel: some View {
+    var visualizationPanel: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("3D VIEW", systemImage: "cube.fill")
+                    .font(.system(size: 11, weight: .heavy))
 
-    VStack(
-        alignment: .leading,
-        spacing: 14
-    ) {
+                Spacer()
 
-        Text("3D VIEW")
-            .font(.headline)
+                Text("\(Int(soilTransparency * 100))% SOIL")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
 
-        HStack {
+            HStack(spacing: 6) {
+                Text("SOIL")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
 
-            Text("Soil transparency")
+                Slider(
+                    value: $soilTransparency,
+                    in: 0.05...0.85
+                )
+                .controlSize(.mini)
 
-            Slider(
-                value:
-                    $soilTransparency,
-                in: 0.05...0.85
+                Text("\(Int(soilTransparency * 100))%")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .frame(width: 26, alignment: .trailing)
+            }
+
+            HStack(spacing: 4) {
+                compactVisualizationToggle(
+                    "Ground",
+                    icon: "square.3.layers.3d",
+                    isOn: $showGround
+                )
+
+                compactVisualizationToggle(
+                    "Ants",
+                    icon: "ant.fill",
+                    isOn: $showAnts
+                )
+            }
+
+            HStack(spacing: 4) {
+                compactVisualizationToggle(
+                    "Invaders",
+                    icon: "exclamationmark.triangle.fill",
+                    isOn: $showInvaders
+                )
+
+                compactVisualizationToggle(
+                    "Food",
+                    icon: "leaf.fill",
+                    isOn: $showFood
+                )
+            }
+
+            compactVisualizationToggle(
+                "Pheromones",
+                icon: "wave.3.right",
+                isOn: $showPheromones
             )
 
-            Text(
-                "\(Int(soilTransparency * 100))%"
-            )
-            .font(
-                .caption.monospacedDigit()
-            )
-            .frame(
-                width: 45
-            )
+            Text("Drag orbit • Scroll zoom • Pan move")
+                .font(.system(size: 8, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
-
-        Toggle(
-            "Ground / soil",
-            isOn: $showGround
+        .padding(8)
+        .frame(maxWidth: 250, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color.white.opacity(0.06))
         )
-
-        Toggle(
-            "Individual ants",
-            isOn: $showAnts
-        )
-
-        Toggle(
-            "Invaders",
-            isOn: $showInvaders
-        )
-
-        Toggle(
-            "Food sources",
-            isOn: $showFood
-        )
-
-        Toggle(
-            "Pheromone field",
-            isOn: $showPheromones
-        )
-
-        Text(
-            "Camera: drag to orbit • " +
-            "scroll to zoom • " +
-            "pan to move"
-        )
-        .font(.caption)
-        .foregroundStyle(.secondary)
+        
     }
-    .padding()
-    .background(
-        RoundedRectangle(
-            cornerRadius: 14
-        )
-        .fill(
-            Color.white.opacity(0.06)
-        )
-    )
-}
-
+    private func compactVisualizationToggle(
+        _ title: String,
+        icon: String,
+        isOn: Binding<Bool>
+    ) -> some View {
+        Toggle(isOn: isOn) {
+            Label(title, systemImage: icon)
+                .font(.system(size: 9, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .toggleStyle(.switch)
+        .controlSize(.mini)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    
 }
 
 // MARK: - Statistics
 
 private extension ContentView {
 
-var statisticsPanel: some View {
-
-    LazyVGrid(
-        columns: [
-            GridItem(.flexible()),
-            GridItem(.flexible())
-        ],
-        spacing: 10
-    ) {
-
-     
-       
-
-        statistic(
-            title: "Colony Energy",
-            value: String(
-                format: "%.1f",
-                simulation.colonyEnergy
+    var statisticsPanel: some View {
+        VStack(spacing: 3) {
+            compactStatistic(
+                title: "ENERGY",
+                value: String(format: "%.1f", simulation.colonyEnergy),
+                icon: "bolt.fill",
+                color: .yellow
             )
-        )
 
-
-        statistic(
-            title: "Tunnels",
-            value:
-                "\(simulation.tunnelsBuilt)"
-        )
-
-
-        statistic(
-            title: "Searching",
-            value:
-                "\(simulation.searchingCount)"
-        )
-
-        statistic(
-            title: "Returning",
-            value:
-                "\(simulation.returningCount)"
-        )
-
-        statistic(
-            title: "Building",
-            value:
-                "\(simulation.buildingCount)"
-        )
-
-    
-    }
-}
-
-func statistic(
-    title: String,
-    value: String
-) -> some View {
-
-    VStack(
-        alignment: .leading,
-        spacing: 4
-    ) {
-
-        Text(title)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-        Text(value)
-            .font(
-                .system(
-                    size: 18,
-                    weight: .semibold,
-                    design: .rounded
-                )
+            compactStatistic(
+                title: "TUNNELS",
+                value: "\(simulation.tunnelsBuilt)",
+                icon: "point.3.connected.trianglepath.dotted",
+                color: .brown
             )
+
+            compactStatistic(
+                title: "SEARCHING",
+                value: "\(simulation.searchingCount)",
+                icon: "magnifyingglass",
+                color: .cyan
+            )
+
+            compactStatistic(
+                title: "RETURNING",
+                value: "\(simulation.returningCount)",
+                icon: "arrow.uturn.backward.circle.fill",
+                color: .green
+            )
+
+            compactStatistic(
+                title: "BUILDING",
+                value: "\(simulation.buildingCount)",
+                icon: "hammer.fill",
+                color: .orange
+            )
+        }
+        .padding(6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+        )
     }
-    .frame(
-        maxWidth: .infinity,
-        alignment: .leading
-    )
-    .padding()
-    .background(
-        RoundedRectangle(
-            cornerRadius: 12
+
+    private func compactStatistic(
+        title: String,
+        value: String,
+        icon: String,
+        color: Color
+    ) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(color)
+                .frame(width: 12)
+
+            Text(title)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, minHeight: 19, alignment: .leading)
+        .padding(.horizontal, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Color.white.opacity(0.035))
         )
-        .fill(
-            Color.white.opacity(0.05)
-        )
-    )
-}
+    }
 
 
 }

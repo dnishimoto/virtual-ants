@@ -3095,9 +3095,7 @@ struct AntColony3DView: UIViewRepresentable {
                     alpha: 1
                 )
 
-            default:
-
-                return UIColor.white
+         
             }
         }
 
