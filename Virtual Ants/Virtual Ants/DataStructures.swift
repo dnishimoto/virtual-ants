@@ -206,5 +206,5 @@ struct ColonyCell {
     // Environmental stress.
     var threat: Double = 0.0
     
-    var storedFood: Double = 0.0
+    var storedFood: Double = 250.0
 }

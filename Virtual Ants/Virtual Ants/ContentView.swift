@@ -738,11 +738,7 @@ private extension ContentView {
                         )
                 }
 
-                // All hands on deck
-                //
-                // The command is passed to
-                // AntColony3DView, which handles
-                // the .allHands action.
+               /*
                 controlIconButton(
                     systemImage:
                         "shield.lefthalf.filled",
@@ -762,6 +758,7 @@ private extension ContentView {
                                 .allHands
                         )
                 }
+                */
             }
         }
         .padding(7)
