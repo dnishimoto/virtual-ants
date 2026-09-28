@@ -13,6 +13,19 @@ import Combine
 
 @MainActor
 final class AntColonySimulation: ObservableObject {
+
+
+    private var maintenanceCounter = 0
+    private var pheromoneCounter = 0
+    private var densityCounter = 0
+    private var foodCleanupCounter = 0
+    private var colonyEvaluationCounter = 0
+
+    private let maintenanceInterval = 4
+    private let pheromoneInterval = 2
+    private let densityInterval = 2
+    private let foodCleanupInterval = 8
+    private let colonyEvaluationInterval = 4
     
     private let lowEnergyReturnThreshold = 30.0
     private let recoveredEnergyThreshold = 75.0
@@ -267,7 +280,163 @@ final class AntColonySimulation: ObservableObject {
 
         updateStorageCapacity()
     }
-    
+    // MARK: - Shared Step Values
+
+    func updateSharedStepValues() {
+        // ---------------------------------------------------------
+        // Population
+        // ---------------------------------------------------------
+
+        let population = ants.count
+        let maxPopulation = max(parameters.maxPopulation, 1)
+
+        populationPressure =
+            min(
+                1.0,
+                Double(population) / Double(maxPopulation)
+            )
+
+        // ---------------------------------------------------------
+        // Population pressure derived values
+        // ---------------------------------------------------------
+
+        // How much free population capacity remains.
+        populationCapacity =
+            max(
+                0.0,
+                1.0 - populationPressure
+            )
+
+        // Crowding pressure becomes significant as the colony
+        // approaches its population limit.
+        crowdingPressure =
+            populationPressure * populationPressure
+
+        // ---------------------------------------------------------
+        // Food
+        // ---------------------------------------------------------
+
+        let totalFood = foodSources.reduce(0.0) {
+            $0 + $1.amount
+        }
+
+        totalFoodAvailable = totalFood
+
+        let foodCapacity = max(parameters.maxFood, 1.0)
+
+        foodPressure =
+            min(
+                1.0,
+                totalFood / foodCapacity
+            )
+
+        foodScarcity =
+            max(
+                0.0,
+                1.0 - foodPressure
+            )
+
+        // ---------------------------------------------------------
+        // Colony energy
+        // ---------------------------------------------------------
+
+        let totalEnergy = ants.reduce(0.0) {
+            $0 + $1.energy
+        }
+
+        totalAntEnergy = totalEnergy
+
+        let maximumEnergy =
+            max(
+                Double(population) *
+                parameters.initialAntEnergy,
+                1.0
+            )
+
+        colonyEnergyPressure =
+            min(
+                1.0,
+                totalEnergy / maximumEnergy
+            )
+
+        colonyEnergyScarcity =
+            max(
+                0.0,
+                1.0 - colonyEnergyPressure
+            )
+
+        // ---------------------------------------------------------
+        // Pheromone environment
+        // ---------------------------------------------------------
+
+        // Calculate this once rather than once for every ant.
+        pheromoneDecayFactor =
+            max(
+                0.0,
+                min(
+                    1.0,
+                    1.0 - parameters.pheromoneEvaporationRate
+                )
+            )
+
+        // ---------------------------------------------------------
+        // Environmental pressure
+        // ---------------------------------------------------------
+
+        let environmentalStress =
+            max(
+                0.0,
+                min(
+                    1.0,
+                    parameters.environmentalStress
+                )
+            )
+
+        sharedEnvironmentalStress = environmentalStress
+
+        // ---------------------------------------------------------
+        // Reproduction pressure
+        // ---------------------------------------------------------
+
+        reproductionPressure =
+            populationPressure *
+            foodPressure
+
+        // ---------------------------------------------------------
+        // Movement pressure
+        // ---------------------------------------------------------
+
+        // Reduce unnecessary movement when the colony is crowded.
+        movementPressure =
+            max(
+                0.0,
+                1.0 - crowdingPressure
+            )
+
+        // ---------------------------------------------------------
+        // Global activity factor
+        // ---------------------------------------------------------
+
+        let activityFromFood =
+            0.5 + 0.5 * foodPressure
+
+        let activityFromPopulation =
+            1.0 - 0.5 * crowdingPressure
+
+        let activityFromStress =
+            1.0 - 0.5 * environmentalStress
+
+        sharedActivityFactor =
+            max(
+                0.0,
+                min(
+                    1.0,
+                    activityFromFood *
+                    activityFromPopulation *
+                    activityFromStress
+                )
+            )
+    }
 
     func alertAllHands() {
         guard !ants.isEmpty else { return }
@@ -746,7 +915,7 @@ final class AntColonySimulation: ObservableObject {
         return nil
     }
 
-    // MARK: Simulation
+    
 
     func step() {
 
@@ -755,8 +924,11 @@ final class AntColonySimulation: ObservableObject {
         }
 
         generation += 1
-        
-        // Existing simulation work.
+
+        // --------------------------------------------------------
+        // 1. Infrequent systems
+        // --------------------------------------------------------
+
         defenseStepCounter += 1
 
         if defenseStepCounter >= 3 {
@@ -766,27 +938,100 @@ final class AntColonySimulation: ObservableObject {
 
         generateFoodIfNeeded()
 
-        updateLocalPopulationDensity()
+        // --------------------------------------------------------
+        // 2. Local ant simulation
+        // --------------------------------------------------------
+        //
+        // This is the primary high-frequency simulation.
+        // Ant behavior should run every generation.
+        //
 
         moveAnts()
 
+        // --------------------------------------------------------
+        // 3. Construction
+        // --------------------------------------------------------
+        //
+        // Construction is already incremental, so it does not
+        // need a full-grid update every generation.
+        //
+
         performColonyConstruction()
 
-        evaporatePheromones()
+        // --------------------------------------------------------
+        // 4. Pheromone field
+        // --------------------------------------------------------
+
+        pheromoneCounter += 1
+
+        if pheromoneCounter >= pheromoneInterval {
+            pheromoneCounter = 0
+            evaporatePheromones()
+        }
+
+        // --------------------------------------------------------
+        // 5. Colony resources
+        // --------------------------------------------------------
 
         consumeColonyEnergy()
-
         convertStoredFoodToEnergy()
+
+        // --------------------------------------------------------
+        // 6. Population dynamics
+        // --------------------------------------------------------
 
         populationDynamics()
 
-        removeDepletedFood()
+        // --------------------------------------------------------
+        // 7. Food cleanup
+        // --------------------------------------------------------
+        //
+        // Do not scan the entire grid every generation.
+        //
 
-        updateStorageCapacity()
+        foodCleanupCounter += 1
 
-        evaluateColony()
+        if foodCleanupCounter >= foodCleanupInterval {
+            foodCleanupCounter = 0
+            removeDepletedFood()
+        }
+
+        // --------------------------------------------------------
+        // 8. Storage capacity
+        // --------------------------------------------------------
+        //
+        // Capacity only changes when construction completes.
+        // Therefore it should NOT be recalculated every step.
+        //
+
+        // updateStorageCapacity() removed from here
+
+        // --------------------------------------------------------
+        // 9. Occupancy
+        // --------------------------------------------------------
+        //
+        // Density is used for movement, but does not need a
+        // complete 6,500-cell reset every generation.
+        //
+
+        densityCounter += 1
+
+        if densityCounter >= densityInterval {
+            densityCounter = 0
+            updateLocalPopulationDensity()
+        }
+
+        // --------------------------------------------------------
+        // 10. Colony status
+        // --------------------------------------------------------
+
+        colonyEvaluationCounter += 1
+
+        if colonyEvaluationCounter >= colonyEvaluationInterval {
+            colonyEvaluationCounter = 0
+            evaluateColony()
+        }
     }
-
     // MARK: Density
 
     private func updateLocalPopulationDensity() {
