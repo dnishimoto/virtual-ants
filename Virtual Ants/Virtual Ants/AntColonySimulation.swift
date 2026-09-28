@@ -818,12 +818,31 @@ final class AntColonySimulation: ObservableObject {
     private func moveAnts() {
         let pressure = cachedPopulationPressure
 
-        // Only this many healthy ants remain in the nest for brood care.
-        // Everyone else is returned to foraging once sufficiently recovered.
-        let broodCareTarget = max(10, min(30, ants.count / 12))
+        let foodRatio = storedFood / max(storageCapacity, 1.0)
 
-        // Count nest workers once per simulation step, not once per ant.
-        var broodCareWorkers = ants.reduce(into: 0) { count, ant in
+        // High stored food means the colony can safely send more workers out.
+        let broodCareFraction: Double
+
+        switch foodRatio {
+        case 0.75...:
+            broodCareFraction = 0.05
+
+        case 0.50..<0.75:
+            broodCareFraction = 0.10
+
+        case 0.25..<0.50:
+            broodCareFraction = 0.15
+
+        default:
+            broodCareFraction = 0.20
+        }
+
+        let broodCareTarget = max(
+            6,
+            min(40, Int(Double(ants.count) * broodCareFraction))
+        )
+
+        var nestCareCount = ants.reduce(into: 0) { count, ant in
             if ant.state == .resting &&
                isInsideNest(x: ant.x, y: ant.y) {
                 count += 1
@@ -840,7 +859,7 @@ final class AntColonySimulation: ObservableObject {
                 continue
             }
 
-            // Food has priority over every other job.
+            // Food delivery is always the highest worker priority.
             if ants[i].hasFood {
                 ants[i].defending = false
                 ants[i].defenseTargetID = nil
@@ -852,8 +871,7 @@ final class AntColonySimulation: ObservableObject {
                 continue
             }
 
-            // Defenders are moved by moveDefendingAnts() in stepDefenseSystem().
-            // Do not also send them through worker movement here.
+            // Defenders move only in stepDefenseSystem().
             if ants[i].defending {
                 ants[i].state = .defending
                 continue
@@ -874,7 +892,7 @@ final class AntColonySimulation: ObservableObject {
                 continue
             }
 
-            // Weak ants return home before they reach zero energy.
+            // Weak workers return for feeding and recovery.
             if ants[i].energy <= lowEnergyReturnThreshold,
                ants[i].state != .returningForFood {
                 ants[i].state = .returningForFood
@@ -887,7 +905,8 @@ final class AntColonySimulation: ObservableObject {
                 continue
             }
 
-            // Ants in the nest recover, then are released deterministically.
+            // Nest worker behavior:
+            // recover if weak; otherwise leave unless needed for brood care.
             if ants[i].state == .resting {
                 guard isInsideNest(x: ants[i].x, y: ants[i].y) else {
                     ants[i].state = .returningForFood
@@ -898,7 +917,6 @@ final class AntColonySimulation: ObservableObject {
 
                 feedAntFromStoredFood(index: i)
 
-                // Small passive energy recovery while at the nest.
                 ants[i].energy = min(
                     100.0,
                     ants[i].energy + 0.30
@@ -909,21 +927,20 @@ final class AntColonySimulation: ObservableObject {
                     continue
                 }
 
-                // Keep only the brood-care target at home.
-                // Healthy excess workers always go back to food searching.
-                if broodCareWorkers > broodCareTarget {
+                // High food: release excess nest ants immediately.
+                if nestCareCount > broodCareTarget {
                     ants[i].state = .searching
-                    broodCareWorkers -= 1
-                } else if broodCareWorkers < broodCareTarget {
-                    // This ant is part of the small brood-care reserve.
-                    // It remains resting, but will be released if the reserve fills.
-                    broodCareWorkers += 1
+                    nestCareCount -= 1
+                } else if nestCareCount < broodCareTarget {
+                    // This ant remains in the small brood-care group.
+                    nestCareCount += 1
                 } else {
-                    // At exactly target, release a small fraction so the
-                    // workload continues to rotate rather than locking up.
-                    if Double.random(in: 0...1) < 0.12 {
+                    // At the exact target, continue rotating workers out.
+                    let releaseChance = foodRatio >= 0.75 ? 0.45 : 0.18
+
+                    if Double.random(in: 0...1) < releaseChance {
                         ants[i].state = .searching
-                        broodCareWorkers -= 1
+                        nestCareCount -= 1
                     }
                 }
 
@@ -931,8 +948,8 @@ final class AntColonySimulation: ObservableObject {
                 continue
             }
 
-            // Stop construction during shortages so more ants remain foraging.
-            if !foodEmergencyActive,
+            // Construction is disabled if food is low.
+            if foodRatio >= 0.40,
                shouldConstruct(ant: ants[i]) {
                 ants[i].state = .building
 
@@ -942,7 +959,7 @@ final class AntColonySimulation: ObservableObject {
                 continue
             }
 
-            // Pick up food before performing more search movement.
+            // Pick up food if close enough.
             if let foodIndex = foodAt(
                 x: ants[i].x,
                 y: ants[i].y,
@@ -957,7 +974,7 @@ final class AntColonySimulation: ObservableObject {
                 continue
             }
 
-            // All other healthy workers forage.
+            // Healthy non-nest workers forage.
             ants[i].state = .searching
 
             moveSearchingAnt(
@@ -2016,40 +2033,49 @@ final class AntColonySimulation: ObservableObject {
     }
 
     private func populationDynamics() {
-        guard generation % reproductionInterval == 0 else {
+        // Check births more frequently than the original every-3-step cycle.
+        // This function is still called every simulation step from step().
+        guard generation % 2 == 0 else {
             return
         }
 
         guard ants.count < maximumPopulation else {
-            currentReproductionRate = 0
+            currentReproductionRate = 0.0
             return
         }
 
-        guard !foodEmergencyActive,
-              foodReserveRatio >= minimumBreedingFoodRatio else {
-            currentReproductionRate = 0
-            return
-        }
-
+        let foodRatio = storedFood / max(storageCapacity, 1.0)
         let energyPerAnt = colonyEnergy / Double(max(ants.count, 1))
 
-        guard energyPerAnt >= 1.5 else {
-            currentReproductionRate = 0
+        // Do not reproduce during a real shortage.
+        guard foodRatio >= 0.30 else {
+            currentReproductionRate = 0.0
             return
         }
 
-        let brood: Double
-
-        switch foodReserveRatio {
-        case ..<0.45:
-            brood = 0
-        case 0.45..<0.75:
-            brood = 0.60 + ((foodReserveRatio - 0.45) / 0.30) * 0.30
-        default:
-            brood = 1.0
+        // Require only modest colony energy; food is the primary resource.
+        guard energyPerAnt >= 0.75 else {
+            currentReproductionRate = 0.0
+            return
         }
 
-        let rate = min(0.085, 0.010 + brood * 0.075)
+        // More stored food means a substantially larger brood allocation.
+        let rate: Double
+
+        switch foodRatio {
+        case 0.30..<0.45:
+            rate = 0.015       // 1.5% of population every 2 steps
+
+        case 0.45..<0.65:
+            rate = 0.035       // 3.5% every 2 steps
+
+        case 0.65..<0.85:
+            rate = 0.060       // 6.0% every 2 steps
+
+        default:
+            rate = 0.090       // 9.0% every 2 steps
+        }
+
         currentReproductionRate = rate
 
         let requestedBirths = max(
@@ -2057,64 +2083,80 @@ final class AntColonySimulation: ObservableObject {
             Int((Double(ants.count) * rate).rounded(.down))
         )
 
-        let capacityRemaining = maximumPopulation - ants.count
-        let possibleBirths = min(requestedBirths, capacityRemaining)
+        let remainingPopulationSpace = maximumPopulation - ants.count
 
-        guard possibleBirths > 0 else {
-            return
-        }
-
-        let cost = foodReserveRatio >= 0.75 ? 4.5 : 5.5
-
-        let foodAllowedBirths = Int(
-            max(0.0, storedFood - storageCapacity * 0.35) / cost
+        // Keep a ceiling so a high-speed timer does not jump instantly to 1,000.
+        let maximumBirthsThisCycle = min(
+            30,
+            remainingPopulationSpace
         )
 
-        let actualBirths = min(possibleBirths, foodAllowedBirths)
+        // Preserve food for worker recovery and emergency return-to-nest behavior.
+        let protectedFood = storageCapacity * 0.20
+        let foodAvailableForBrood = max(0.0, storedFood - protectedFood)
 
-        guard actualBirths > 0 else {
+        let foodCostPerBirth = 3.5
+        let foodAffordableBirths = Int(foodAvailableForBrood / foodCostPerBirth)
+
+        let birthCount = min(
+            requestedBirths,
+            maximumBirthsThisCycle,
+            foodAffordableBirths
+        )
+
+        guard birthCount > 0 else {
+            currentReproductionRate = 0.0
             return
         }
 
-        let totalFoodCost = Double(actualBirths) * cost
-        let consumedFood = consumeStoredFood(totalFoodCost)
+        let totalFoodCost = Double(birthCount) * foodCostPerBirth
 
-        let birthsAffordableByConsumedFood = Int(consumedFood / cost)
+        // Update global food, which is the canonical food amount used by
+        // worker feeding, food ratio, UI, and subsequent birth decisions.
+        storedFood = max(0.0, storedFood - totalFoodCost)
 
-        guard birthsAffordableByConsumedFood > 0 else {
-            return
-        }
+        // Update physical storage cells when they exist.
+        // This call safely does nothing if no storage cells were built yet.
+        withdrawFromStorageChambers(amount: totalFoodCost)
 
         colonyEnergy = max(
-            0,
-            colonyEnergy - Double(birthsAffordableByConsumedFood) * 1.25
+            0.0,
+            colonyEnergy - Double(birthCount) * 0.35
         )
 
-        for _ in 0..<birthsAffordableByConsumedFood {
+        for _ in 0..<birthCount {
             let angle = Double.random(in: 0...(Double.pi * 2.0))
-            let radius = Double.random(in: 1...5)
+            let radius = Double.random(in: 1.0...4.0)
 
-            let child = Ant(
-                x: Double(nestCenterX) + cos(angle) * radius,
-                y: Double(nestCenterY) + sin(angle) * radius,
+            let newborn = Ant(
+                x: clamp(
+                    Double(nestCenterX) + cos(angle) * radius,
+                    1.0,
+                    Double(width - 2)
+                ),
+                y: clamp(
+                    Double(nestCenterY) + sin(angle) * radius,
+                    1.0,
+                    Double(height - 2)
+                ),
                 state: .resting,
-                energy: Double.random(in: 78...96),
+                energy: Double.random(in: 84.0...98.0),
                 pheromoneSensitivity: Double.random(in: 0.8...1.2),
                 explorationBias: Double.random(in: 0.8...1.2)
             )
 
-            ants.append(child)
+            ants.append(newborn)
 
-            let x = Int(child.x.rounded())
-            let y = Int(child.y.rounded())
+            let childX = Int(newborn.x.rounded())
+            let childY = Int(newborn.y.rounded())
 
-            if x >= 0, x < width,
-               y >= 0, y < height {
-                cells[indexFor(x, y)].antCount += 1
+            if childX >= 0, childX < width,
+               childY >= 0, childY < height {
+                cells[indexFor(childX, childY)].antCount += 1
             }
         }
 
-        births += birthsAffordableByConsumedFood
+        births += birthCount
     }
 
     private func removeDeadAnts() {
