@@ -10,6 +10,18 @@ import SwiftUI
 import SceneKit
 import UIKit
 
+// MARK: - 3D View Command
+
+struct AntColony3DCommand: Equatable {
+    enum Action: Equatable {
+        case resetCamera
+        case allHands
+    }
+
+    var id: UUID = UUID()
+    var action: Action
+}
+
 // MARK: - 3D Scene View
 
 struct AntColony3DView: UIViewRepresentable {
@@ -21,7 +33,7 @@ struct AntColony3DView: UIViewRepresentable {
     let showAnts: Bool
     let showPheromones: Bool
     let showInvaders: Bool
-    let cameraResetToken: UUID
+    let command: AntColony3DCommand
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -87,7 +99,7 @@ struct AntColony3DView: UIViewRepresentable {
             showAnts: showAnts,
             showPheromones: showPheromones,
             showInvaders: showInvaders,
-            cameraResetToken: cameraResetToken
+            command: command
         )
     }
 
@@ -173,8 +185,7 @@ struct AntColony3DView: UIViewRepresentable {
         private var hasBuiltStaticScene =
             false
 
-        private var lastCameraResetToken:
-            UUID?
+        private var lastCommandID: UUID?
 
         private let cellSize:
             CGFloat = 0.42
@@ -338,18 +349,21 @@ struct AntColony3DView: UIViewRepresentable {
                 Bool,
             showInvaders:
                 Bool,
-            cameraResetToken:
-                UUID
+            command:
+                AntColony3DCommand
         ) {
 
             self.simulation = simulation
 
-            if lastCameraResetToken != cameraResetToken {
-
-                resetCamera()
-
-                lastCameraResetToken =
-                    cameraResetToken
+            // Handle one unified command API
+            if lastCommandID != command.id {
+                switch command.action {
+                case .resetCamera:
+                    resetCamera()
+                case .allHands:
+                    simulation.alertAllHands()
+                }
+                lastCommandID = command.id
             }
 
             let tunnelCount =
@@ -416,23 +430,10 @@ struct AntColony3DView: UIViewRepresentable {
             if showInvaders !=
                 lastInvaderVisibility {
 
-                if !showInvaders {
-
-                    invaderNode.childNodes
-                        .forEach {
-                            $0.isHidden = true
-                        }
-
-                } else {
-
-                    invaderNode.childNodes
-                        .forEach {
-                            $0.isHidden = false
-                        }
-                }
-
-                lastInvaderVisibility =
-                    showInvaders
+                // Toggle the container node directly; dynamic updates will
+                // handle creating/removing/updating child nodes as needed.
+                invaderNode.isHidden = !showInvaders
+                lastInvaderVisibility = showInvaders
             }
 
             updateDynamicState(
@@ -3095,7 +3096,7 @@ struct AntColony3DView: UIViewRepresentable {
                     alpha: 1
                 )
 
-         
+
             }
         }
 
@@ -3157,3 +3158,4 @@ struct AntColony3DView: UIViewRepresentable {
         #endif
     }
 }
+

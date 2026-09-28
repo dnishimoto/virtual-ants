@@ -267,6 +267,69 @@ final class AntColonySimulation: ObservableObject {
 
         updateStorageCapacity()
     }
+    
+
+    func alertAllHands() {
+        guard !ants.isEmpty else { return }
+
+        // Find the strongest active threat.
+        guard let primaryTarget = invaders.max(by: {
+            $0.threatLevel < $1.threatLevel
+        }) else {
+            return
+        }
+
+        // Raise the colony-wide defensive alarm.
+        defensiveAlarm = max(defensiveAlarm, 1.0)
+
+        // Alert ants that are available for defense.
+        for index in ants.indices {
+            guard ants[index].energy > 0 else { continue }
+
+            // Existing defenders remain assigned to the threat.
+            if ants[index].defending {
+                ants[index].defenseTargetID = primaryTarget.id
+                continue
+            }
+
+            // Recruit available ants.
+            ants[index].defending = true
+            ants[index].defenseTargetID = primaryTarget.id
+        }
+    }
+
+   
+    private func randomInvaderType() -> InvaderType {
+
+        let types: [(InvaderType, Double)] = [
+            (.rivalAnt, InvaderType.rivalAnt.spawnWeight),
+            (.worm, InvaderType.worm.spawnWeight),
+            (.cockroach, InvaderType.cockroach.spawnWeight),
+            (.spider, InvaderType.spider.spawnWeight),
+            (.mouse, InvaderType.mouse.spawnWeight)
+        ]
+
+        let totalWeight = types.reduce(0.0) {
+            $0 + $1.1
+        }
+
+        guard totalWeight > 0 else {
+            return .rivalAnt
+        }
+
+        var value = Double.random(in: 0..<totalWeight)
+
+        for (type, weight) in types {
+
+            value -= weight
+
+            if value <= 0 {
+                return type
+            }
+        }
+
+        return .rivalAnt
+    }
     private func feedAntFromStoredFood(index: Int) {
         guard ants.indices.contains(index) else {
             return
@@ -3553,7 +3616,7 @@ extension AntColonySimulation {
                 continue
             }
 
-            let type = chooseInvaderType()
+            let type = randomInvaderType()
 
             invaders.append(
                 ColonyInvader(
